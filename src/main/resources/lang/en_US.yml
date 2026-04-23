@@ -1,0 +1,165 @@
+core:
+  reload:
+    success: "<success>Configuration reloaded.</success>"
+    failed: "<error>Reload failed: <reason></error>"
+  version:
+    line: "<primary>TeaCore</primary> <muted>v</muted><highlight><version></highlight>"
+  command:
+    no-permission: "<error>You don't have permission to use that.</error>"
+    unknown: "<error>Unknown subcommand. Try </error><accent>/tea help</accent><error>.</error>"
+    player-only: "<error>This command can only be run by a player.</error>"
+  help:
+    header: "<primary><bold>TeaCore commands</bold></primary>"
+    entry: "<accent>/tea <cmd></accent> <muted>-</muted> <secondary><desc></secondary>"
+    reload: "<accent>/tea reload</accent> <muted>-</muted> <secondary>Reload config, theme, and locale bundles</secondary>"
+    version: "<accent>/tea version</accent> <muted>-</muted> <secondary>Show the running TeaCore version</secondary>"
+    arena: "<accent>/tea arena</accent> <muted>-</muted> <secondary>Manage arenas (run it to list subcommands)</secondary>"
+    game: "<accent>/tea game list</accent> <muted>-</muted> <secondary>Show registered games</secondary>"
+    map: "<accent>/tea map</accent> <muted>-</muted> <secondary>Create and edit arena maps</secondary>"
+    stats: "<accent>/tea stats [player]</accent> <muted>-</muted> <secondary>Show stats for a player across all games</secondary>"
+    hint-arena: "<muted>Type </muted><accent>/tea arena</accent><muted> for the full arena subcommand list.</muted>"
+  boot:
+    ready: "<success>TeaCore online.</success>"
+  countdown:
+    title: "<accent><seconds></accent>"
+    subtitle: "<secondary>Starting...</secondary>"
+    chat: "<primary>Game starts in</primary> <accent><seconds>s</accent>"
+    go:
+      title: "<success><bold>GO!</bold></success>"
+      subtitle: ""
+    abort:
+      title: "<warning><bold>Countdown aborted</bold></warning>"
+      subtitle: "<secondary>Waiting for more players</secondary>"
+  arena:
+    usage: "<secondary>Usage:</secondary> <accent>/tea arena <list|allocate|join|spectate|leave|release></accent>"
+    not-found: "<error>No arena matches </error><accent><id></accent><error>.</error>"
+    help:
+      header: "<primary><bold>Arena subcommands</bold></primary>"
+      list: "<accent>/tea arena list</accent> <muted>-</muted> <secondary>Show every allocated arena with state and player count</secondary>"
+      allocate: "<accent>/tea arena allocate <game> [map]</accent> <muted>-</muted> <secondary>Allocate a new arena for a game (admin)</secondary>"
+      join: "<accent>/tea arena join <arenaId></accent> <muted>-</muted> <secondary>Join a specific arena as a player</secondary>"
+      spectate: "<accent>/tea arena spectate <arenaId></accent> <muted>-</muted> <secondary>Join a specific arena as a spectator</secondary>"
+      observe: "<accent>/tea arena observe <arenaId></accent> <muted>-</muted> <secondary>Teleport into an arena world without becoming a participant (admin)</secondary>"
+      leave: "<accent>/tea arena leave</accent> <muted>-</muted> <secondary>Leave the arena you are currently in</secondary>"
+      release: "<accent>/tea arena release <arenaId></accent> <muted>-</muted> <secondary>Destroy an arena and evacuate its occupants (admin)</secondary>"
+      start: "<accent>/tea arena start <arenaId></accent> <muted>-</muted> <secondary>Force the next lifecycle transition immediately (admin)</secondary>"
+    list:
+      header: "<primary><bold>Arenas</bold></primary>"
+      empty: "<muted>(no arenas allocated)</muted>"
+      entry: "<accent><id></accent> <muted>@</muted><secondary><server></secondary> <muted>-</muted> <secondary><game></secondary> <muted>map=</muted><highlight><map></highlight> <muted>state=</muted><primary><state></primary> <muted>(</muted><players><muted>/</muted><max><muted>)</muted>"
+    allocate:
+      usage: "<secondary>Usage:</secondary> <accent>/tea arena allocate <game> [map]</accent>"
+      success: "<success>Allocated arena</success> <accent><id></accent> <muted>for</muted> <primary><game></primary> <muted>(map=</muted><map><muted>)</muted>"
+      failed: "<error>Allocation failed: <reason></error>"
+    join:
+      usage: "<secondary>Usage:</secondary> <accent>/tea arena join <arenaId></accent>"
+      success: "<success>Joined arena</success> <accent><id></accent>"
+      failed: "<error>Could not join arena (full or unavailable).</error>"
+    leave:
+      success: "<success>You left the arena.</success>"
+      not-in-arena: "<warning>You are not in an arena.</warning>"
+    observe:
+      usage: "<secondary>Usage:</secondary> <accent>/tea arena observe <arenaId></accent>"
+      success: "<success>Observing arena</success> <accent><id></accent><muted>. Type </muted><accent>/tea arena leave</accent><muted> or teleport elsewhere to exit.</muted>"
+    release:
+      usage: "<secondary>Usage:</secondary> <accent>/tea arena release <arenaId></accent>"
+      success: "<success>Released arena</success> <accent><id></accent>"
+    start:
+      usage: "<secondary>Usage:</secondary> <accent>/tea arena start <arenaId></accent>"
+      done: "<success>Arena</success> <accent><id></accent> <success>skipped to the next phase.</success>"
+  queue:
+    bossbar: "<accent>Queued:</accent> <primary><game></primary> <muted>-</muted> #<position><muted>/</muted><total>"
+  map:
+    usage: "<secondary>Usage:</secondary> <accent>/tea map <create|edit|pos1|pos2|waiting|addspawn|clearspawns|save|discard|list|info|reload|delete></accent> <muted>(plus any game-registered subcommand)</muted>"
+    no-active-draft: "<error>No active draft. Run </error><accent>/tea map create <game> <map></accent><error> or </error><accent>/tea map edit <game> <map></accent><error>.</error>"
+    not-in-edit-world: "<error>Return to your edit world first: </error><accent><world></accent>"
+    create:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map create <game> <map></accent>"
+      started: "<success>Created edit world</success> <accent><world></accent> <muted>for</muted> <primary><game>/<map></primary><muted>. Paste or build your map, then set pos1/pos2 and spawns.</muted>"
+      failed: "<error>Create failed: <reason></error>"
+    edit:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map edit <game> <map></accent>"
+      started: "<success>Editing map</success> <accent><game>/<map></accent> <muted>in</muted> <accent><world></accent> <muted>(</muted><spawns><muted> spawns)</muted>"
+      failed: "<error>Edit failed: <reason></error>"
+    pos1:
+      set: "<success>pos1 set at</success> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight>"
+    pos2:
+      set: "<success>pos2 set at</success> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight>"
+    waiting:
+      set: "<success>Waiting spawn set at</success> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight>"
+    addspawn:
+      added: "<success>Added spawn</success> <accent><id></accent> <muted>at</muted> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight> <muted>(total:</muted> <count><muted>)</muted>"
+    clearspawns:
+      done: "<warning>Cleared <count> participant spawn(s).</warning>"
+    extension:
+      set: "<success>Updated</success> <accent><id></accent>"
+      failed: "<error>Extension</error> <accent><id></accent> <error>failed: <reason></error>"
+    removeextension:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map removeextension <id-or-subcommand></accent>"
+      done: "<warning>Removed extension</warning> <accent><id></accent>"
+      missing: "<warning>No extension set for</warning> <accent><id></accent>"
+    status:
+      header: "<primary><bold>Draft status</bold></primary> <muted>-</muted> <accent><game>/<map></accent>"
+      entry: "<muted>- </muted><secondary><field>:</secondary> <highlight><value></highlight>"
+      ready: "<success>All required fields are set; you can </success><accent>/tea map save</accent><success>.</success>"
+      missing-header: "<warning>Before saving, set:</warning>"
+      missing:
+        pos1: "<error>- pos1: stand in one corner of the build area and run </error><accent>/tea map pos1</accent>"
+        pos2: "<error>- pos2: stand in the opposite corner and run </error><accent>/tea map pos2</accent>"
+        participant-spawns: "<error>- at least one participant spawn: stand at each player spawn and run </error><accent>/tea map addspawn</accent>"
+        waiting-spawn: "<error>- waiting spawn: stand where players should wait pre-match and run </error><accent>/tea map waiting</accent>"
+        extension: "<error>- required extension </error><accent><id></accent><error>: run </error><accent>/tea map <subcommand></accent>"
+        no-active-draft: "<error>- no active draft. Start with </error><accent>/tea map create</accent><error> or </error><accent>/tea map edit</accent>"
+    min:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map min <number></accent>"
+      set: "<success>Player bounds:</success> <accent><min></accent><muted>-</muted><accent><max></accent>"
+    max:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map max <number></accent>"
+      set: "<success>Player bounds:</success> <accent><min></accent><muted>-</muted><accent><max></accent>"
+    save:
+      success: "<success>Saved map</success> <accent><game>/<map></accent> <muted>(</muted><spawns><muted> spawns)</muted>"
+      failed: "<error>Save failed: <reason></error>"
+      no-spawns: "<error>Add at least one participant spawn with </error><accent>/tea map addspawn</accent><error>.</error>"
+      missing-header: "<warning><bold>Cannot save yet.</bold> The following still need to be set:</warning>"
+    discard:
+      done: "<warning>Discarded draft.</warning>"
+      none: "<warning>No active draft to discard.</warning>"
+    list:
+      header: "<primary><bold>Registered maps</bold></primary>"
+      empty: "<muted>(no maps registered)</muted>"
+      entry: "<accent><game>/<map></accent> <muted>(</muted><spawns><muted> spawns,</muted> <min><muted>-</muted><max> <muted>players)</muted>"
+    info:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map info <game> <map></accent>"
+      not-found: "<error>Map not found: </error><accent><game>/<map></accent>"
+      header: "<primary><bold>Map</bold></primary> <accent><game>/<map></accent>"
+      schematic: "<muted>schematic:</muted> <highlight><file></highlight>"
+      waiting: "<muted>waiting spawn:</muted> <highlight><waiting></highlight>"
+      spawns: "<muted>participant spawns:</muted> <highlight><count></highlight>"
+      players: "<muted>players:</muted> <highlight><min></highlight><muted>-</muted><highlight><max></highlight>"
+    reload:
+      done: "<success>Reloaded maps:</success> <muted>was</muted> <highlight><before></highlight><muted>, now</muted> <highlight><after></highlight>"
+    delete:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map delete <game> <map></accent>"
+      done: "<success>Deleted map</success> <accent><game>/<map></accent>"
+      failed: "<error>Delete failed: <reason></error>"
+  kit-picker:
+    usage: "<secondary>Usage:</secondary> <accent>/kit [game] [kitId]</accent><muted>. Run inside an arena to auto-fill the game.</muted>"
+    title: "Select kit: <game>"
+    selected: "<success>Selected kit</success> <accent><kit></accent> <muted>for</muted> <primary><game></primary>"
+    unknown: "<error>Unknown kit </error><accent><kit></accent><error> for </error><primary><game></primary><error>.</error>"
+    none: "<warning>No kits registered for </warning><primary><game></primary><warning>.</warning>"
+  chat:
+    usage: "<secondary>Usage:</secondary> <accent>/chat <match|team|staff|global></accent>"
+    unknown-channel: "<error>Unknown channel </error><accent><channel></accent><error>.</error>"
+    active-channel: "<success>Active chat channel:</success> <accent><channel></accent>"
+  stats:
+    usage: "<secondary>Usage:</secondary> <accent>/tea stats [player]</accent>"
+    header: "<primary><bold>Stats for <player></bold></primary>"
+    game: "<accent><game></accent>"
+    entry: "<muted>  <label></muted><secondary>:</secondary> <highlight><value></highlight>"
+    empty: "<muted>(no stats recorded)</muted>"
+  game:
+    list:
+      header: "<primary><bold>Registered games</bold></primary>"
+      empty: "<muted>(no games registered)</muted>"
+      entry: "<accent><id></accent> <muted>maps=</muted><maps> <muted>teams=</muted><primary><teams></primary>"

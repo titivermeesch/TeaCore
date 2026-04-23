@@ -1,0 +1,11 @@
+styles:
+  primary: "<#5fd1ff>"
+  secondary: "<gray>"
+  accent: "<#ffb454>"
+  success: "<green>"
+  error: "<red>"
+  warning: "<yellow>"
+  highlight: "<bold><white>"
+  muted: "<dark_gray>"
+
+prefix: ""

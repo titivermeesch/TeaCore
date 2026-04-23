@@ -1,0 +1,21 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.vscode/
+.project
+.classpath
+.settings/
+
+# Node / dashboard
+dashboard/node_modules/
+dashboard/dist/
+dashboard/tsconfig.tsbuildinfo
+
+*.log
+.DS_Store

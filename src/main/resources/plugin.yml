@@ -1,0 +1,60 @@
+name: TeaCore
+version: '${version}'
+main: me.playbosswar.tea.core.impl.TeaCorePlugin
+api-version: '1.21'
+author: playbosswar
+description: Shared engine for Tea minigames.
+load: STARTUP
+softdepend: [WorldEdit, FastAsyncWorldEdit]
+
+commands:
+  tea:
+    description: TeaCore administration commands
+    aliases: [teacore]
+    permission: tea.admin
+    usage: /tea <reload|version|help|arena|game|map>
+  chat:
+    description: Switch your active chat channel
+    aliases: [ch]
+    usage: /chat <match|team|staff|global>
+  kit:
+    description: Open the kit picker or select a kit
+    permission: tea.kit
+    usage: /kit [game] [kitId]
+
+permissions:
+  tea.admin:
+    description: Full TeaCore admin access
+    default: op
+    children:
+      tea.reload: true
+      tea.version: true
+      tea.arena.admin: true
+      tea.arena.play: true
+      tea.chat.staff: true
+      tea.chat.global: true
+      tea.map.admin: true
+  tea.reload:
+    description: Reload TeaCore config, theme, and locale bundles
+    default: op
+  tea.version:
+    description: View TeaCore version
+    default: true
+  tea.arena.admin:
+    description: Allocate and release arenas
+    default: op
+  tea.arena.play:
+    description: Join, spectate, leave arenas
+    default: true
+  tea.chat.staff:
+    description: Send and receive messages on the staff chat channel
+    default: op
+  tea.chat.global:
+    description: Send messages on the global chat channel
+    default: op
+  tea.map.admin:
+    description: Create, edit, and delete map definitions via /tea map
+    default: op
+  tea.kit:
+    description: Open the kit picker or select a kit
+    default: true

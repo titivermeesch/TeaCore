@@ -1,0 +1,41 @@
+[versions]
+spigot = "1.21.4-R0.1-SNAPSHOT"
+adventure = "4.18.0"
+adventurePlatform = "4.3.4"
+hikari = "6.2.1"
+lettuce = "6.5.1.RELEASE"
+caffeine = "3.1.8"
+javalin = "6.3.0"
+jackson = "2.18.2"
+sqlite = "3.47.2.0"
+mysql = "9.1.0"
+worldedit = "7.3.7"
+junit = "5.11.3"
+archunit = "1.3.0"
+assertj = "3.26.3"
+shadow = "8.3.5"
+
+[libraries]
+spigot-api = { module = "org.spigotmc:spigot-api", version.ref = "spigot" }
+
+adventure-api = { module = "net.kyori:adventure-api", version.ref = "adventure" }
+adventure-minimessage = { module = "net.kyori:adventure-text-minimessage", version.ref = "adventure" }
+adventure-platform-bukkit = { module = "net.kyori:adventure-platform-bukkit", version.ref = "adventurePlatform" }
+
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
+lettuce = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+javalin = { module = "io.javalin:javalin", version.ref = "javalin" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+mysql-connector = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
+
+worldedit-bukkit = { module = "com.sk89q.worldedit:worldedit-bukkit", version.ref = "worldedit" }
+worldedit-core = { module = "com.sk89q.worldedit:worldedit-core", version.ref = "worldedit" }
+
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

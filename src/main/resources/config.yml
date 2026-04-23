@@ -1,0 +1,59 @@
+network:
+  mode: standalone            # standalone | bungeecord | multi-server
+  server-id: auto             # unique id for this backend; "auto" reads $TEA_SERVER_ID or falls back to random
+  lobby-server: lobby         # name of the lobby backend (used on match-end and kick-out)
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+
+database:
+  type: sqlite
+  sqlite-file: plugins/TeaCore/tea.db
+  mysql:
+    host: localhost
+    port: 3306
+    database: tea
+    user: tea
+    password: ""
+
+i18n:
+  default-locale: en_US
+  fallback-chain:
+    - en_US
+
+arena-pool:
+  # How the warm-pool of arenas is managed. Pick based on deployment shape:
+  #   standalone - this backend hosts arenas itself; pool sizes are per-backend.
+  #                Use for single-server setups where the lobby and games run together.
+  #   central    - lobby + multiple arena backends; the matchmaker leader allocates
+  #                arenas across the fleet. Pool sizes are network-wide totals.
+  #   external   - one arena per backend (k8s pod-per-match). Core does NOT allocate;
+  #                external orchestration (HPA, queue-driven scaler) creates pods.
+  mode: standalone
+
+  # Per-game overrides. If a game id isn't listed here, the game's own default
+  # (from its GameDefinition) applies. Keys default to -1 meaning "use the
+  # game's default".
+  games:
+    # ascend:
+    #   min-available: 1
+    #   max-total: 4
+    #   preload-on-startup: 0
+
+dashboard:
+  # The management dashboard is distributed: every backend mirrors its events
+  # into the coordination backend (Redis or in-memory) so one dashboard can
+  # render the whole fleet. Enable this on EXACTLY ONE server (normally the
+  # lobby). If multiple instances have it enabled they each run an independent
+  # HTTP listener on the configured port - harmless if ports differ, but they
+  # each show the same data and each have their own admin token. Operators
+  # running multiple lobbies should pick one canonical lobby for the dashboard.
+  enabled: false
+  # "0.0.0.0" to bind all interfaces, "127.0.0.1" to restrict to localhost.
+  bind-address: "0.0.0.0"
+  port: 8080
+  # Admin token for API auth. Leave blank on first boot to auto-generate one;
+  # the generated value is written back to this file and printed to console.
+  admin-token: ""
