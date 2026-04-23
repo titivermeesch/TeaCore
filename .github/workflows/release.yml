@@ -35,7 +35,7 @@ jobs:
           ref=${GITHUB_REF_NAME}
           echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build
+      - name: Build against lowest supported Spigot API (for publishing)
         run: ./gradlew -PteacoreVersion=${{ steps.version.outputs.version }} build --stacktrace
 
       - name: Publish to GitHub Packages

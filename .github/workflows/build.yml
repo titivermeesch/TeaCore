@@ -11,6 +11,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build against the lowest supported Spigot API (the Java 21 floor) and
+        # against a recent release, so we catch both regressions on old servers
+        # and breakage from API changes on the latest server.
+        spigot:
+          - '1.20.5-R0.1-SNAPSHOT'
+          - '1.21.4-R0.1-SNAPSHOT'
+    name: build (spigot ${{ matrix.spigot }})
     steps:
       - uses: actions/checkout@v4
 
@@ -27,4 +37,4 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - run: ./gradlew build --stacktrace
+      - run: ./gradlew -PspigotApiVersion=${{ matrix.spigot }} build --stacktrace
