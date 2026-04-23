@@ -1,7 +1,7 @@
 name: TeaCore
 version: '${version}'
 main: me.playbosswar.tea.core.impl.TeaCorePlugin
-api-version: '1.21'
+api-version: '1.20'
 author: playbosswar
 description: Shared engine for Tea minigames.
 load: STARTUP

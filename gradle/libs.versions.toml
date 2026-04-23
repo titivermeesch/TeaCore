@@ -1,5 +1,4 @@
 [versions]
-spigot = "1.21.4-R0.1-SNAPSHOT"
 adventure = "4.18.0"
 adventurePlatform = "4.3.4"
 hikari = "6.2.1"
@@ -16,8 +15,6 @@ assertj = "3.26.3"
 shadow = "8.3.5"
 
 [libraries]
-spigot-api = { module = "org.spigotmc:spigot-api", version.ref = "spigot" }
-
 adventure-api = { module = "net.kyori:adventure-api", version.ref = "adventure" }
 adventure-minimessage = { module = "net.kyori:adventure-text-minimessage", version.ref = "adventure" }
 adventure-platform-bukkit = { module = "net.kyori:adventure-platform-bukkit", version.ref = "adventurePlatform" }

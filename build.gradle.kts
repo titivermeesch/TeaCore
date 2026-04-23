@@ -7,6 +7,13 @@ plugins {
 group = "me.playbosswar.tea"
 version = (project.findProperty("teacoreVersion") as String?) ?: "0.1.0-SNAPSHOT"
 
+// Spigot API version driving compileOnly / testImplementation. Defaults to the
+// lowest supported release (the first Minecraft version that requires Java 21)
+// so Maven-published artifacts have the widest server compatibility. CI
+// overrides this in a matrix to also verify the build against the latest
+// release.
+val spigotApiVersion = (project.findProperty("spigotApiVersion") as String?) ?: "1.20.5-R0.1-SNAPSHOT"
+
 repositories {
     mavenCentral()
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
@@ -37,7 +44,7 @@ tasks.withType<ProcessResources>().configureEach {
 }
 
 dependencies {
-    compileOnly(libs.spigot.api)
+    compileOnly("org.spigotmc:spigot-api:$spigotApiVersion")
     compileOnly(libs.worldedit.bukkit) { isTransitive = false }
     compileOnly(libs.worldedit.core) { isTransitive = false }
 
@@ -52,7 +59,7 @@ dependencies {
     implementation(libs.sqlite.jdbc)
     implementation(libs.mysql.connector)
 
-    testImplementation(libs.spigot.api)
+    testImplementation("org.spigotmc:spigot-api:$spigotApiVersion")
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.archunit.junit5)
     testImplementation(libs.assertj)
@@ -138,7 +145,7 @@ publishing {
             name = "GitHubPackages"
             url = uri(
                 (project.findProperty("teacoreRepoUrl") as String?)
-                    ?: "https://maven.pkg.github.com/PlayBossWar/teacore"
+                    ?: "https://maven.pkg.github.com/playbosswar/teacore"
             )
             credentials {
                 username = System.getenv("GITHUB_ACTOR")

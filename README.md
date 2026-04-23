@@ -1,13 +1,15 @@
 # TeaCore
 
-A reusable minigame engine for Paper/Spigot 1.21.4 servers. TeaCore handles the scaffolding every PvP minigame needs — arena lifecycle, in-game map authoring, kits, abilities, cooldowns, chat routing, stats persistence, i18n, theming, proxy handoff, matchmaking, and an embedded web dashboard — so game plugins can focus on gameplay.
+A reusable minigame engine for Paper/Spigot servers. TeaCore handles the scaffolding every PvP minigame needs — arena lifecycle, in-game map authoring, kits, abilities, cooldowns, chat routing, stats persistence, i18n, theming, proxy handoff, matchmaking, and an embedded web dashboard — so game plugins can focus on gameplay.
 
 TeaCore is consumed by separate game plugin jars (for example TeaLobby and published minigame plugins) that declare `depend: [TeaCore]` and register a `GameDefinition` at enable time.
+
+Full user and developer documentation: [TeaDocs](https://github.com/playbosswar/TeaDocs).
 
 ## Requirements
 
 - Java 21
-- Paper (or Spigot) 1.21.4 for runtime
+- Paper (or Spigot) **1.20.5** or newer for runtime (first Minecraft version to require Java 21)
 - Node.js + npm (the dashboard SPA is bundled into the jar at build time)
 
 Optional runtime dependencies:
@@ -41,31 +43,6 @@ Generate API Javadoc (public `api/**` packages only):
 ./gradlew apiJavadoc
 ```
 
-## Publishing
-
-TeaCore publishes two things:
-
-1. A shadow jar on every GitHub Release (tag push), uploaded as a release asset — this is what server admins download.
-2. A Maven artifact to GitHub Packages (`me.playbosswar.tea:teacore:<version>`) — this is what game plugin authors compile against.
-
-### Publishing locally
-
-```
-./gradlew publishToMavenLocal
-```
-
-Downstream projects (TeaLobby, game plugins) can then compile against TeaCore from `~/.m2`.
-
-### Publishing to GitHub Packages
-
-Releases are cut via the `release.yml` workflow (tag a commit `vX.Y.Z`). The workflow sets `GITHUB_TOKEN` automatically.
-
-To publish manually from a workstation, set `GITHUB_ACTOR` + `GITHUB_TOKEN` (a PAT with `write:packages`) in the environment, then:
-
-```
-./gradlew -PteacoreVersion=0.1.0 publish
-```
-
 ## Consuming TeaCore from another plugin
 
 Your plugin compiles against the plain `teacore` jar (no shading, no transitive impl deps) and declares TeaCore as a runtime plugin dependency in `plugin.yml`.
@@ -77,7 +54,7 @@ repositories {
     mavenCentral()
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
     maven {
-        url = uri("https://maven.pkg.github.com/PlayBossWar/teacore")
+        url = uri("https://maven.pkg.github.com/playbosswar/teacore")
         credentials {
             username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
             password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.key").orNull
@@ -86,7 +63,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("org.spigotmc:spigot-api:1.21.4-R0.1-SNAPSHOT")
+    compileOnly("org.spigotmc:spigot-api:1.20.5-R0.1-SNAPSHOT")
     compileOnly("me.playbosswar.tea:teacore:0.1.0")
 }
 ```
@@ -108,7 +85,7 @@ gpr.key=ghp_xxx_personal_access_token
     </repository>
     <repository>
         <id>teacore-gh</id>
-        <url>https://maven.pkg.github.com/PlayBossWar/teacore</url>
+        <url>https://maven.pkg.github.com/playbosswar/teacore</url>
     </repository>
 </repositories>
 
@@ -116,7 +93,7 @@ gpr.key=ghp_xxx_personal_access_token
     <dependency>
         <groupId>org.spigotmc</groupId>
         <artifactId>spigot-api</artifactId>
-        <version>1.21.4-R0.1-SNAPSHOT</version>
+        <version>1.20.5-R0.1-SNAPSHOT</version>
         <scope>provided</scope>
     </dependency>
     <dependency>
@@ -146,7 +123,7 @@ Put GitHub credentials in `~/.m2/settings.xml`:
 name: MyGame
 main: com.example.MyGamePlugin
 version: 1.0.0
-api-version: "1.21"
+api-version: "1.20"
 depend: [TeaCore]
 ```
 
@@ -169,25 +146,8 @@ public void onEnable() {
 3. Install a game plugin that depends on TeaCore.
 4. (Optional) Flip `dashboard.enabled: true` on one server to enable the web UI; browse to `http://<host>:8080` with the auto-generated admin token.
 
-Full deployment, configuration, and admin documentation lives in the separate `tea-docs` repo (rendered at the public docs site).
-
-## Project layout
-
-```
-teacore/
-├── build.gradle.kts             # single-module Gradle build + shadow + publishing
-├── settings.gradle.kts
-├── gradle/                      # wrapper + version catalog
-├── gradlew, gradlew.bat
-├── dashboard/                   # React SPA bundled into the jar under /dashboard/
-└── src/
-    └── main/java/me/playbosswar/tea/core/
-        ├── api/                 # public surface; consumers compile against this only
-        └── impl/                # internals; hidden behind the api boundary via ArchUnit
-```
-
-The `api` / `impl` split is enforced at test time by `ArchitectureTest` — `api` classes must never depend on `impl`.
+Full deployment, configuration, and admin documentation lives in [TeaDocs](https://github.com/playbosswar/TeaDocs).
 
 ## License
 
-See the Spigot listing (`SPIGOT_TEACORE.md`) for end-user licensing. The plugin is free for any number of servers.
+MIT. See `LICENSE` in the repository root.
