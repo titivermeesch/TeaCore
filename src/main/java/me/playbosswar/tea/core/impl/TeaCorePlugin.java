@@ -11,6 +11,7 @@ import me.playbosswar.tea.core.api.chat.ChatRouter;
 import me.playbosswar.tea.core.api.chat.MatchBroadcaster;
 import me.playbosswar.tea.core.api.coordination.CoordinationBackend;
 import me.playbosswar.tea.core.api.cooldown.CooldownService;
+import me.playbosswar.tea.core.api.economy.EconomyService;
 import me.playbosswar.tea.core.api.transport.ProxyTransport;
 import me.playbosswar.tea.core.api.effect.EffectService;
 import me.playbosswar.tea.core.api.game.GameRegistry;
@@ -40,6 +41,7 @@ import me.playbosswar.tea.core.impl.coordination.RedisBackend;
 import me.playbosswar.tea.core.impl.dashboard.DashboardServer;
 import me.playbosswar.tea.core.impl.transport.BungeeChannelTransport;
 import me.playbosswar.tea.core.impl.cooldown.CooldownServiceImpl;
+import me.playbosswar.tea.core.impl.economy.VaultEconomyService;
 import me.playbosswar.tea.core.impl.effect.EffectServiceImpl;
 import me.playbosswar.tea.core.impl.game.GameRegistryImpl;
 import me.playbosswar.tea.core.impl.kit.AbilityTriggerListener;
@@ -66,7 +68,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
     private static final List<String> BUNDLED_LOCALES = List.of("en_US");
-    private static final List<String> CORE_MIGRATIONS = List.of("V001__init.sql");
+    private static final List<String> CORE_MIGRATIONS = List.of(
+            "V001__init.sql",
+            "V002__kit_unlocks.sql");
 
     private CoreConfig config;
     private ThemeImpl theme;
@@ -82,6 +86,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private TeamManagerImpl teamManager;
     private KitRegistryImpl kitRegistry;
     private CooldownServiceImpl cooldownService;
+    private VaultEconomyService economyService;
     private EffectServiceImpl effectService;
     private ChatRouterImpl chatRouterImpl;
     private MatchBroadcasterImpl matchBroadcasterImpl;
@@ -142,9 +147,19 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.arenaManager = new ArenaManagerImpl(this, gameRegistry, mapService, getLogger());
 
             this.teamManager = new TeamManagerImpl(arenaManager, gameRegistry);
-            this.kitRegistry = new KitRegistryImpl();
+            this.kitRegistry = new KitRegistryImpl(databaseService.dataSource(), getLogger());
             this.cooldownService = new CooldownServiceImpl(this);
             this.cooldownService.start();
+
+            // Vault is a hard dep, but the Economy service provider is usually
+            // registered by a separate plugin that may load after TeaCore. Resolve
+            // on the next tick so all plugins have had a chance to enable.
+            this.economyService = new VaultEconomyService(getLogger());
+            org.bukkit.Bukkit.getScheduler().runTask(this, () -> {
+                if (!this.economyService.isAvailable()) {
+                    this.economyService = new VaultEconomyService(getLogger());
+                }
+            });
             this.effectService = new EffectServiceImpl();
             this.statsRegistry = new StatsRegistryImpl();
 
@@ -158,9 +173,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                     .registerEvents(new ArenaDisconnectListener(arenaManager), this);
             getServer().getPluginManager().registerEvents(chatRouterImpl, this);
 
-            KitSelectorGui kitSelectorGui = new KitSelectorGui(this, kitRegistry, messageService);
+            KitSelectorGui kitSelectorGui = new KitSelectorGui(this, kitRegistry, messageService, economyService);
             getServer().getPluginManager().registerEvents(
-                    new KitSelectorListener(this, kitSelectorGui, kitRegistry, messageService), this);
+                    new KitSelectorListener(this, kitSelectorGui, kitRegistry, messageService, economyService), this);
 
             this.lifecycleTicker = new LifecycleTicker(this, arenaManager, gameRegistry, messageService);
             this.lifecycleTicker.start();
@@ -391,6 +406,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     @Override
     public CooldownService cooldowns() {
         return cooldownService;
+    }
+
+    @Override
+    public EconomyService economy() {
+        return economyService;
     }
 
     @Override

@@ -5,6 +5,7 @@ api-version: '1.20'
 author: playbosswar
 description: Shared engine for Tea minigames.
 load: STARTUP
+depend: [Vault]
 softdepend: [WorldEdit, FastAsyncWorldEdit]
 
 commands:
@@ -16,6 +17,7 @@ commands:
   chat:
     description: Switch your active chat channel
     aliases: [ch]
+    permission: tea.chat.use
     usage: /chat <match|team|staff|global>
   kit:
     description: Open the kit picker or select a kit
@@ -31,9 +33,13 @@ permissions:
       tea.version: true
       tea.arena.admin: true
       tea.arena.play: true
+      tea.chat.use: true
       tea.chat.staff: true
       tea.chat.global: true
       tea.map.admin: true
+      tea.stats: true
+      tea.economy.balance: true
+      tea.economy.admin: true
   tea.reload:
     description: Reload TeaCore config, theme, and locale bundles
     default: op
@@ -44,7 +50,10 @@ permissions:
     description: Allocate and release arenas
     default: op
   tea.arena.play:
-    description: Join, spectate, leave arenas
+    description: Join, spectate, leave arenas via /tea arena join|spectate|observe|leave
+    default: true
+  tea.chat.use:
+    description: Use /chat to switch the active chat channel (match/team by default)
     default: true
   tea.chat.staff:
     description: Send and receive messages on the staff chat channel
@@ -56,5 +65,14 @@ permissions:
     description: Create, edit, and delete map definitions via /tea map
     default: op
   tea.kit:
-    description: Open the kit picker or select a kit
+    description: Open the kit picker or select a kit via /kit
     default: true
+  tea.stats:
+    description: View your own stats via /tea stats (admins with tea.admin can view other players)
+    default: true
+  tea.economy.balance:
+    description: View your own balance via /tea economy balance
+    default: true
+  tea.economy.admin:
+    description: Give, take, set player balances, and view other players' balances via /tea economy
+    default: op

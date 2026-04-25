@@ -148,6 +148,15 @@ core:
     selected: "<success>Selected kit</success> <accent><kit></accent> <muted>for</muted> <primary><game></primary>"
     unknown: "<error>Unknown kit </error><accent><kit></accent><error> for </error><primary><game></primary><error>.</error>"
     none: "<warning>No kits registered for </warning><primary><game></primary><warning>.</warning>"
+    cost: "<muted>Cost:</muted> <highlight><cost></highlight>"
+    cost-unlocked: "<muted>Cost:</muted> <success><cost></success> <muted>(owned)</muted>"
+    cost-insufficient: "<error>Cost:</error> <highlight><cost></highlight> <error>(you have <balance>)</error>"
+    locked-prefix: "<error>[LOCKED]</error> <name>"
+    purchased: "<success>Purchased kit</success> <accent><kit></accent> <muted>for</muted> <highlight><cost></highlight>"
+    insufficient: "<error>Insufficient balance.</error> <muted>Cost:</muted> <highlight><cost></highlight><muted>, you have</muted> <highlight><balance></highlight>"
+    economy-unavailable: "<error>Economy is unavailable. No Vault provider is registered.</error>"
+    withdraw-failed: "<error>Could not complete purchase (withdraw failed).</error>"
+    unlock-failed: "<error>Could not record unlock. You have been refunded.</error>"
   chat:
     usage: "<secondary>Usage:</secondary> <accent>/chat <match|team|staff|global></accent>"
     unknown-channel: "<error>Unknown channel </error><accent><channel></accent><error>.</error>"
@@ -163,3 +172,20 @@ core:
       header: "<primary><bold>Registered games</bold></primary>"
       empty: "<muted>(no games registered)</muted>"
       entry: "<accent><id></accent> <muted>maps=</muted><maps> <muted>teams=</muted><primary><teams></primary>"
+  economy:
+    usage: "<secondary>Usage:</secondary> <accent>/tea economy <balance|give|take|set></accent>"
+    unavailable: "<error>No economy provider is registered. Install a Vault-compatible economy plugin.</error>"
+    invalid-amount: "<error>Invalid amount:</error> <accent><value></accent>"
+    operation-failed: "<error>Economy operation failed for</error> <accent><player></accent>"
+    balance:
+      usage: "<secondary>Usage:</secondary> <accent>/tea economy balance [player]</accent>"
+      result: "<primary><player></primary><secondary>'s balance:</secondary> <highlight><amount></highlight>"
+    give:
+      usage: "<secondary>Usage:</secondary> <accent>/tea economy give <player> <amount></accent>"
+      success: "<success>Gave</success> <highlight><amount></highlight> <success>to</success> <accent><player></accent> <muted>(new balance: <balance>)</muted>"
+    take:
+      usage: "<secondary>Usage:</secondary> <accent>/tea economy take <player> <amount></accent>"
+      success: "<success>Took</success> <highlight><amount></highlight> <success>from</success> <accent><player></accent> <muted>(new balance: <balance>)</muted>"
+    set:
+      usage: "<secondary>Usage:</secondary> <accent>/tea economy set <player> <amount></accent>"
+      success: "<success>Set</success> <accent><player></accent><success>'s balance to</success> <highlight><amount></highlight>"

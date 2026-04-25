@@ -1,5 +1,10 @@
 package me.playbosswar.tea.core.impl.kit;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
@@ -7,6 +12,9 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.sql.DataSource;
 import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.kit.Ability;
 import me.playbosswar.tea.core.api.kit.Kit;
@@ -20,6 +28,14 @@ public final class KitRegistryImpl implements KitRegistry {
     private final ConcurrentHashMap<GameId, ConcurrentHashMap<String, Supplier<Ability>>> abilityFactories = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<GameId, ConcurrentHashMap<String, Kit>> kits = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<GameId, String>> selections = new ConcurrentHashMap<>();
+
+    private final DataSource dataSource;
+    private final Logger logger;
+
+    public KitRegistryImpl(DataSource dataSource, Logger logger) {
+        this.dataSource = dataSource;
+        this.logger = logger;
+    }
 
     @Override
     public void registerAbility(GameId gameId, String abilityId, Supplier<Ability> factory) {
@@ -59,6 +75,46 @@ public final class KitRegistryImpl implements KitRegistry {
             return kit(gameId, kitId);
         }
         return kitsFor(gameId).stream().findFirst();
+    }
+
+    @Override
+    public boolean isUnlocked(UUID playerId, Kit kit) {
+        if (kit.cost() <= 0) return true;
+        if (dataSource == null || playerId == null) return false;
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement ps = c.prepareStatement(
+                        "SELECT 1 FROM tea_kit_unlocks WHERE player_uuid = ? AND game_id = ? AND kit_id = ?")) {
+            ps.setString(1, playerId.toString());
+            ps.setString(2, kit.gameId().value());
+            ps.setString(3, kit.kitId());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Kit-unlock lookup failed for " + playerId + " / " + kit.kitId(), e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean unlock(UUID playerId, Kit kit) {
+        if (dataSource == null || playerId == null) return false;
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement ps = c.prepareStatement(
+                        "INSERT INTO tea_kit_unlocks (player_uuid, game_id, kit_id, unlocked_at) "
+                                + "VALUES (?, ?, ?, ?)")) {
+            ps.setString(1, playerId.toString());
+            ps.setString(2, kit.gameId().value());
+            ps.setString(3, kit.kitId());
+            ps.setTimestamp(4, Timestamp.from(Instant.now()));
+            ps.executeUpdate();
+            return true;
+        } catch (Exception e) {
+            // Likely a PK collision (already unlocked) — treat as success.
+            if (isUnlocked(playerId, kit)) return true;
+            logger.log(Level.WARNING, "Failed to record kit unlock for " + playerId + " / " + kit.kitId(), e);
+            return false;
+        }
     }
 
     @Override

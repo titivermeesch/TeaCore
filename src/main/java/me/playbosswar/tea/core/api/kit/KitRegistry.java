@@ -2,6 +2,7 @@ package me.playbosswar.tea.core.api.kit;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 import me.playbosswar.tea.core.api.game.GameId;
 import org.bukkit.entity.Player;
@@ -84,6 +85,38 @@ public interface KitRegistry {
      *         game.
      */
     Optional<Kit> selectedKit(Player player, GameId gameId);
+
+    /**
+     * Checks whether a player has permanently unlocked a kit.
+     *
+     * <p>
+     * Free kits ({@code kit.cost() == 0}) are always considered unlocked.
+     * Priced kits are unlocked once the player has paid the cost via the kit
+     * picker; the unlock record lives in the TeaCore database and persists
+     * across restarts and across servers in the fleet.
+     *
+     * @param playerId player to check; must not be {@code null}.
+     * @param kit      kit to check; must not be {@code null}.
+     * @return {@code true} when the kit is free or the player owns the unlock.
+     */
+    boolean isUnlocked(UUID playerId, Kit kit);
+
+    /**
+     * Records a permanent unlock for a {@code (player, game, kit)} tuple.
+     *
+     * <p>
+     * Idempotent: calling this for an already-unlocked kit is a no-op and
+     * returns {@code true}. This method does not deduct the kit cost from the
+     * player's balance — callers are expected to withdraw the cost through
+     * {@link me.playbosswar.tea.core.api.economy.EconomyService} before
+     * recording the unlock.
+     *
+     * @param playerId player to grant the unlock to; must not be {@code null}.
+     * @param kit      kit to unlock; must not be {@code null}.
+     * @return {@code true} if the row now exists (either just inserted or
+     *         already present); {@code false} on database failure.
+     */
+    boolean unlock(UUID playerId, Kit kit);
 
     /**
      * Places the kit's starter items into the player's inventory at their declared

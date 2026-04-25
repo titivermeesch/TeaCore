@@ -5,6 +5,7 @@ import me.playbosswar.tea.core.api.chat.ChatRouter;
 import me.playbosswar.tea.core.api.chat.MatchBroadcaster;
 import me.playbosswar.tea.core.api.coordination.CoordinationBackend;
 import me.playbosswar.tea.core.api.cooldown.CooldownService;
+import me.playbosswar.tea.core.api.economy.EconomyService;
 import me.playbosswar.tea.core.api.effect.EffectService;
 import me.playbosswar.tea.core.api.game.GameRegistry;
 import me.playbosswar.tea.core.api.kit.KitRegistry;
@@ -184,6 +185,19 @@ public interface TeaCoreAPI {
      * @return the registry, never {@code null}.
      */
     StatsRegistry stats();
+
+    /**
+     * Returns the economy service, which wraps the server's Vault economy
+     * provider.
+     *
+     * <p>
+     * Callers should check {@link EconomyService#isAvailable()} before issuing
+     * balance-dependent operations — Vault is a hard dependency of TeaCore, but
+     * a concrete economy plugin may not have registered itself with Vault yet.
+     *
+     * @return the economy service, never {@code null}.
+     */
+    EconomyService economy();
 
     /**
      * Returns the initialized singleton instance.

@@ -19,6 +19,9 @@ repositories {
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
     maven("https://oss.sonatype.org/content/repositories/snapshots/")
     maven("https://maven.enginehub.org/repo/")
+    // VaultAPI is published via JitPack (hard runtime dep; shipped by the
+    // server admin, not shaded into our jar).
+    maven("https://jitpack.io")
 }
 
 java {
@@ -47,6 +50,7 @@ dependencies {
     compileOnly("org.spigotmc:spigot-api:$spigotApiVersion")
     compileOnly(libs.worldedit.bukkit) { isTransitive = false }
     compileOnly(libs.worldedit.core) { isTransitive = false }
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7.1") { isTransitive = false }
 
     implementation(libs.adventure.api)
     implementation(libs.adventure.minimessage)
