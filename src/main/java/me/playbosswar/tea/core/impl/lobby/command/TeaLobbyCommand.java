@@ -20,8 +20,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 /**
- * {@code /tealobby sign bind|unbind|list}, {@code /tealobby spawn set|tp},
- * {@code /tealobby reload}.
+ * {@code /tea lobby sign bind|unbind|list}, {@code /tea lobby spawn set|tp},
+ * {@code /tea lobby reload}.
  */
 public final class TeaLobbyCommand implements TabExecutor {
 
@@ -52,9 +52,8 @@ public final class TeaLobbyCommand implements TabExecutor {
     }
 
     /**
-     * Dispatch entry point for both the legacy {@code /tealobby ...} alias
-     * and the {@code /tea lobby ...} subcommand path. Pulled out of
-     * {@link #onCommand} so {@code TeaCommand} can call it directly.
+     * Dispatch entry point for the {@code /tea lobby ...} subcommand. Pulled
+     * out of {@link #onCommand} so {@code TeaCommand} can call it directly.
      */
     public void handle(CommandSender sender, String[] args) {
         if (!sender.hasPermission("tea.lobby.admin")) {
@@ -80,7 +79,7 @@ public final class TeaLobbyCommand implements TabExecutor {
     }
 
     /**
-     * Tab-complete entry point shared by {@code /tealobby} and {@code /tea lobby}.
+     * Tab-complete entry point used by {@code /tea lobby}.
      */
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {

@@ -458,8 +458,8 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     }
 
     /**
-     * Lobby admin handler (`/tealobby` and `/tea lobby`); null when
-     * {@code lobby.enabled} is false.
+     * Lobby admin handler (`/tea lobby ...`); null when {@code lobby.enabled}
+     * is false.
      */
     public me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand() {
         return lobbyAdminCommand;

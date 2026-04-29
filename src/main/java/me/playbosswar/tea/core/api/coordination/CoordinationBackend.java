@@ -91,9 +91,9 @@ public interface CoordinationBackend extends AutoCloseable {
      * queued for.
      *
      * <p>
-     * Useful for {@code /queue}-style status commands that need to find the
-     * entry without knowing the {@link GameId} ahead of time. Walks all
-     * queues; cheap when queues are short.
+     * Used by the queue bossbar service and other callers that need to find
+     * a player's entry without knowing the {@link GameId} ahead of time.
+     * Walks all queues; cheap when queues are short.
      *
      * @param playerUuid player to look up; must not be {@code null}.
      * @return the entry, or empty if the player is not currently queued for

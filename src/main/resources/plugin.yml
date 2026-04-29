@@ -84,5 +84,5 @@ permissions:
     description: Queue for a game from the lobby via /play
     default: true
   tea.lobby.admin:
-    description: Manage lobby connection signs, lobby spawn, and lobby config via /tealobby
+    description: Manage lobby connection signs, lobby spawn, and lobby config via /tea lobby
     default: op
