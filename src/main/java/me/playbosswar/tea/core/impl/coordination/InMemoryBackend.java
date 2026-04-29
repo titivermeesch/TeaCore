@@ -1,5 +1,7 @@
 package me.playbosswar.tea.core.impl.coordination;
 
+import static me.playbosswar.tea.core.impl.TeaCorePlugin.ERROR_TRACKER;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -89,6 +91,15 @@ public final class InMemoryBackend implements CoordinationBackend {
     }
 
     @Override
+    public java.util.Optional<QueueEntry> queueEntryOf(UUID playerUuid) {
+        for (QueueEntry e : queue) {
+            if (e.playerUuid().equals(playerUuid))
+                return java.util.Optional.of(e);
+        }
+        return java.util.Optional.empty();
+    }
+
+    @Override
     public void publishHostedGames(java.util.Set<GameId> gameIds) {
         hostedGamesByServer.put(serverId, java.util.Set.copyOf(gameIds));
     }
@@ -103,12 +114,20 @@ public final class InMemoryBackend implements CoordinationBackend {
     }
 
     @Override
+    public java.util.Set<GameId> allHostedGames() {
+        java.util.Set<GameId> out = new java.util.HashSet<>();
+        for (var games : hostedGamesByServer.values()) out.addAll(games);
+        return out;
+    }
+
+    @Override
     public void publishControl(String targetServerId, ControlCommand command) {
         if (!serverId.equals(targetServerId)) return;
         for (Consumer<ControlCommand> h : controlHandlers) {
             try {
                 h.accept(command);
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException e) {
+                ERROR_TRACKER.trackError(e);
             }
         }
     }
@@ -123,7 +142,8 @@ public final class InMemoryBackend implements CoordinationBackend {
         for (Consumer<CoordinationEvent> h : eventHandlers) {
             try {
                 h.accept(event);
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException e) {
+                ERROR_TRACKER.trackError(e);
             }
         }
     }

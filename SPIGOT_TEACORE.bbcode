@@ -1,0 +1,166 @@
+[CENTER]
+[SIZE=7][COLOR=#52A554][B]TeaCore[/B][/COLOR][/SIZE]
+[SIZE=4][I]The minigame engine for Spigot 1.20.5+[/I][/SIZE]
+
+[SIZE=5][B]Stop reinventing arenas. Start shipping minigames.[/B][/SIZE]
+[/CENTER]
+
+[QUOTE]
+[B]Build minigames on a battle-tested foundation.[/B] Arena lifecycle, maps, kits, abilities, chat routing, stats, i18n, theme, matchmaker, dashboard — solved. Ship the fun part.
+[/QUOTE]
+
+TeaCore is a reusable engine for PvP minigames. It doesn't ship a game of its own — it gives you the scaffolding every minigame needs so you can focus on what makes your game unique.
+
+TeaCore also bundles a lobby UI — connection signs, [ICODE]/play[/ICODE], lobby spawn / gamemode management — behind a single [ICODE]lobby.enabled[/ICODE] config toggle. Flip it on for the server(s) you want to act as your hub. Install one of the official Tea minigames (listed at the bottom) for actual gameplay.
+
+[CENTER]
+[SIZE=4][COLOR=#D9534F][B]⚠ Only works with Tea-based minigames[/B][/COLOR][/SIZE]
+[/CENTER]
+TeaCore is the engine that Tea game plugins register themselves against. It is [B]not[/B] a drop-in engine for arbitrary Minecraft minigame plugins — game plugins must declare [ICODE]depend: [TeaCore][/ICODE] and use its API. If you install TeaCore without a Tea game on top, it does nothing player-facing.
+
+[CENTER]📚 [B]Full documentation:[/B] [URL=https://titivermeesch.github.io/TeaDocs/]titivermeesch.github.io/TeaDocs[/URL][/CENTER]
+
+[SIZE=6][COLOR=#52A554][B]Requirements[/B][/COLOR][/SIZE]
+
+[LIST]
+[*]Paper (or Spigot) [B]1.20.5[/B] or newer
+[*]Java [B]21[/B]
+[*][URL=https://www.spigotmc.org/resources/vault.34315/][B]Vault[/B][/URL] — hard dependency. All economy goes through Vault.
+[*][URL=https://www.spigotmc.org/resources/fastasyncworldedit.13932/][B]FastAsyncWorldEdit[/B][/URL] (or WorldEdit) — required on every server that hosts minigame arenas. Drives schematic capture and paste; without it, arenas spawn into empty void worlds and your maps will never load.
+[/LIST]
+
+[B]Optional:[/B]
+[LIST]
+[*][B]A Vault-compatible economy plugin[/B] — needed only if you want paid kits (EssentialsEco, CMI, TNE, XConomy, etc.). Without one, free kits work; priced kits stay locked.
+[*][B]Redis[/B] — only for multi-server fleets. Single-server deployments work without it.
+[*][B]MySQL[/B] — for production persistence. SQLite is the default and needs no setup.
+[/LIST]
+
+[SIZE=6][COLOR=#52A554][B]What you get[/B][/COLOR][/SIZE]
+
+[SIZE=5][B]🎮 Arena lifecycle[/B][/SIZE]
+A full state machine for every arena (waiting → countdown → starting → live → ending → reset), with configurable timings per game. Your game plugin plugs in and subscribes to the transitions it cares about.
+
+[SIZE=5][B]🗺 In-game map authoring[/B][/SIZE]
+Admins build maps without touching YAML:
+[CODE]/tea map create <game> <mapId>
+# build + position spawns in the edit world
+/tea map save[/CODE]
+WorldEdit or FastAsyncWorldEdit (installed separately as a standard plugin) drives region capture and paste. The plugin is a soft-dependency, so arenas fall back to empty void worlds if it's missing. Each live arena gets a freshly-pasted copy of the schematic for a guaranteed-clean state per match.
+
+[SIZE=5][B]🧩 Map extensions framework[/B][/SIZE]
+Games plug custom per-map data into the same authoring flow — additional spawn points, boss pads, ceremony chambers, whatever they need. The data serializes into the map YAML automatically and games read it back via typed keys. No per-game command prefix; everything stays under [ICODE]/tea map[/ICODE].
+
+[SIZE=5][B]🏟 Warm arena pool with three deployment shapes[/B][/SIZE]
+Per-game pool sizes keep joinable arenas ready so first players never wait on a schematic paste. One config knob, three shapes:
+[LIST]
+[*][B]Standalone[/B] — one Paper/Spigot server hosts lobby + games. Pool scales locally.
+[*][B]Central[/B] — proxy (BungeeCord or Velocity) + lobby + multiple arena servers. TeaCore's matchmaker balances new arenas across available servers via Redis.
+[*][B]External[/B] — one game per pod (k8s HPA-style). TeaCore doesn't scale; your orchestrator does.
+[/LIST]
+[CODE=yaml]arena-pool:
+  mode: standalone   # or central / external
+  games:
+    ascend:
+      min-available: 2
+      max-total: 8[/CODE]
+
+[SIZE=5][B]👕 Kits, abilities, cooldowns[/B][/SIZE]
+Your game declares kits (icon, description, starter items, ability list, cost). Abilities hook into right-click, left-click, sneak, jump, damage-taken, and bow-release triggers. Cooldowns render on the XP bar, action bar, or boss bar — your pick per ability.
+
+[SIZE=5][B]💰 Vault economy + paid kits[/B][/SIZE]
+Every kit can carry a one-time unlock cost. Players pay through whatever Vault-compatible economy plugin you have installed; TeaCore handles the withdrawal, records a permanent unlock, and shows the kit as [B][LOCKED][/B] in the picker for players who can't afford it. Free kits stay free; balance management lives in whichever economy plugin you chose ([ICODE]/balance[/ICODE], [ICODE]/eco[/ICODE], [ICODE]/money[/ICODE], whatever it ships).
+
+[SIZE=5][B]💬 Match-scoped chat[/B][/SIZE]
+Chat is automatically routed to the player's arena. Five channels (match, team, spectator, staff, global) with prefix shortcuts and a [ICODE]/chat <channel>[/ICODE] switcher. No more kill-feeds leaking between concurrent matches on the same server.
+
+[SIZE=5][B]🎟 Built-in matchmaker[/B][/SIZE]
+TeaCore owns the matchmaker loop: one leader per fleet, walks each game's queue oldest-first, reserves an arena slot, and routes the player. Allocates new arenas on demand in central mode. The bundled lobby UI exposes [ICODE]/play[/ICODE] on top; TeaCore does the matching.
+
+[SIZE=5][B]📊 Embedded web dashboard[/B][/SIZE]
+TeaCore ships a full management UI — a React SPA bundled into the plugin jar and served over HTTP from the plugin itself. Every running arena, queue entry, online player, and registered game on one screen. Filter arenas by state, expand to see rosters + match uuid, force-start, release, allocate, end-match, delete maps, reload — all with live push updates over WebSocket. No external hosting, no extra deploy step.
+
+[SIZE=5][B]🎨 Theme + i18n[/B][/SIZE]
+A single [ICODE]theme.yml[/ICODE] defines your server's visual language (primary, accent, success, etc.) as MiniMessage tags. Per-plugin translation bundles resolve to each player's [ICODE]Player#getLocale()[/ICODE]. Add new lang keys in your jar — admin edits are preserved and new keys are merged into the on-disk file automatically.
+
+[SIZE=5][B]🗃 Stats + persistence[/B][/SIZE]
+SQLite by default, MySQL for production — flip one config line. Versioned SQL migrations apply automatically on plugin enable. Games register their own stats tables and expose them via [ICODE]/tea stats <player>[/ICODE].
+
+[SIZE=5][B]🔗 Proxy-ready routing[/B][/SIZE]
+Queue with [ICODE]/play <game>[/ICODE] on a lobby server (lobby features enabled in config); TeaCore's matchmaker finds an available arena on any arena server and sends the player there via the legacy [ICODE]BungeeCord[/ICODE] plugin-message channel. Works on BungeeCord [B]and[/B] Velocity — no proxy-side plugin needed.
+
+
+[SIZE=6][COLOR=#52A554][B]Commands[/B][/COLOR][/SIZE]
+
+All provided by TeaCore:
+[LIST]
+[*][ICODE]/tea help[/ICODE] — top-level help
+[*][ICODE]/tea arena list|allocate|join|spectate|observe|leave|release|start[/ICODE] — manage arenas
+[*][ICODE]/tea map create|edit|pos1|pos2|waiting|addspawn|clearspawns|min|max|save|discard|list|info|reload|delete|status[/ICODE] — author maps
+[*][ICODE]/tea game list[/ICODE] — registered games
+[*][ICODE]/tea stats [player][/ICODE] — per-player stats across all games
+[*][ICODE]/tea reload[/ICODE] — reload config + theme + locale bundles
+[*][ICODE]/tea version[/ICODE] — version info
+[*][ICODE]/kit [game] [kitId][/ICODE] — kit selector / picker
+[*][ICODE]/chat <channel>[/ICODE] — switch chat channel
+[/LIST]
+
+Games can register their own [ICODE]/tea map <subcommand>[/ICODE] extensions for game-specific spawns. One prefix, any number of games.
+
+Balance / give / take / set commands are intentionally [B]not[/B] shipped by TeaCore — every Vault-compatible economy plugin already provides them. Use whatever your installed economy plugin gives you ([ICODE]/balance[/ICODE], [ICODE]/eco[/ICODE], [ICODE]/money[/ICODE], …).
+
+
+[SIZE=6][COLOR=#52A554][B]Web dashboard[/B][/COLOR][/SIZE]
+
+Enable once, run anywhere:
+[CODE=yaml]dashboard:
+  enabled: true             # set on EXACTLY one server (usually the lobby)
+  bind-address: "0.0.0.0"
+  port: 8080
+  admin-token: ""           # auto-generated on first boot[/CODE]
+
+Point your browser at [ICODE]http://<lobby-host>:8080[/ICODE], paste the token TeaCore wrote into your [ICODE]config.yml[/ICODE], and you see every arena, queue, and player across the fleet. Control actions (force-start / release / end-match / allocate / reload maps / delete maps) travel through Redis so the lobby's dashboard can drive arenas hosted on separate servers.
+
+Every action requires the admin token; there are no player-facing endpoints.
+
+
+[SIZE=6][COLOR=#52A554][B]Who needs TeaCore?[/B][/COLOR][/SIZE]
+
+[B]Everyone running a Tea-based minigame.[/B] TeaCore is a required dependency of every game in the Tea family — if you want to run [URL=link-to-Ascend-resource]Ascend[/URL] (or any other Tea game) on your server, you install TeaCore first, then the game plugin on top.
+
+[B]Developers building new Tea minigames.[/B] TeaCore gives you the scaffolding every PvP minigame needs so you don't have to reinvent arenas, waiting rooms, kit pickers, per-arena chat, map storage, stats persistence, i18n, theming, proxy handoff, matchmaking queues, or a web dashboard. Dev docs walk you through building a game end-to-end at [URL=https://titivermeesch.github.io/TeaDocs/]TeaDocs[/URL].
+
+Server owners who only want to play: follow the Install section below, then grab one of the Tea minigame plugins (list at the bottom).
+
+
+[SIZE=6][COLOR=#52A554][B]Install[/B][/COLOR][/SIZE]
+
+[LIST=1]
+[*]Install [URL=https://www.spigotmc.org/resources/vault.34315/][B]Vault[/B][/URL]. Add a Vault-compatible economy plugin too if you plan to charge for kits. On servers that host minigame arenas, also install [URL=https://www.spigotmc.org/resources/fastasyncworldedit.13932/][B]FastAsyncWorldEdit[/B][/URL] (or WorldEdit) so maps can be pasted.
+[*]Drop [ICODE]teacore-x.y.z-all.jar[/ICODE] into [ICODE]plugins/[/ICODE].
+[*]Restart. TeaCore extracts [ICODE]config.yml[/ICODE], [ICODE]theme.yml[/ICODE], [ICODE]lang/en_US.yml[/ICODE].
+[*]Pick your deployment shape:
+[INDENT][LIST]
+[*][B]Standalone[/B] → defaults work. Go to step 5.
+[*][B]Central / External[/B] → edit [ICODE]config.yml[/ICODE] to set [ICODE]arena-pool.mode[/ICODE], point [ICODE]redis.host[/ICODE] + [ICODE]database.mysql.*[/ICODE] at your shared infra. See [URL=https://titivermeesch.github.io/TeaDocs/]TeaDocs[/URL] for the full per-mode setup.
+[/LIST][/INDENT]
+[*]Install one of the official Tea minigame plugins — or your own — that depends on TeaCore.
+[*](Optional) Flip [ICODE]dashboard.enabled: true[/ICODE] on one server to enable the web UI.
+[/LIST]
+
+TeaCore provides nothing player-facing on its own — it's infrastructure for Tea-based games.
+
+
+
+[SIZE=6][COLOR=#52A554][B]License[/B][/COLOR][/SIZE]
+
+TeaCore is open-source and released under the [B]MIT License[/B]. Source at [URL=https://github.com/titivermeesch/teacore]github.com/titivermeesch/teacore[/URL].
+
+[LIST]
+[*]Use it on as many servers as you like.
+[*]Build your own Tea minigame plugins against the TeaCore API and ship them however you like — free, commercial, private, whatever fits.
+[/LIST]
+
+If you find it useful, please link to this Spigot resource page from your own plugin's listing rather than re-uploading the jar elsewhere. A credit line ("powered by TeaCore") in your plugin's description is appreciated but not required.
+
+[B]Support:[/B] https://discord.gg/XyP5e2de5T. I answer config questions, bug reports, and reasonable feature requests for TeaCore itself. Debugging your unrelated plugin conflicts or writing custom code for your game is out of scope.

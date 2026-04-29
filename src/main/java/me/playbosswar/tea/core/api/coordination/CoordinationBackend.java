@@ -1,6 +1,7 @@
 package me.playbosswar.tea.core.api.coordination;
 
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -86,6 +87,21 @@ public interface CoordinationBackend extends AutoCloseable {
     Collection<QueueEntry> queueFor(GameId gameId);
 
     /**
+     * Returns the queue entry for a player, regardless of which game they are
+     * queued for.
+     *
+     * <p>
+     * Useful for {@code /queue}-style status commands that need to find the
+     * entry without knowing the {@link GameId} ahead of time. Walks all
+     * queues; cheap when queues are short.
+     *
+     * @param playerUuid player to look up; must not be {@code null}.
+     * @return the entry, or empty if the player is not currently queued for
+     *         any game.
+     */
+    Optional<QueueEntry> queueEntryOf(UUID playerUuid);
+
+    /**
      * Returns the zero-based position of a player in their queue.
      *
      * @param playerUuid player to look up; must not be {@code null}.
@@ -142,6 +158,21 @@ public interface CoordinationBackend extends AutoCloseable {
      * @return server ids hosting this game, never {@code null}.
      */
     Set<String> hostsOf(GameId gameId);
+
+    /**
+     * Returns the union of every game id that any server in the fleet has
+     * declared via {@link #publishHostedGames(Set)}.
+     *
+     * <p>
+     * Used by the leader's pool manager so it can iterate fleet-wide game
+     * ids without having those games registered in its own
+     * {@link me.playbosswar.tea.core.api.game.GameRegistry}. In a split
+     * deployment the leader (typically the lobby) doesn't run any game
+     * plugins itself.
+     *
+     * @return all hosted game ids, never {@code null}.
+     */
+    Set<GameId> allHostedGames();
 
     // --- Control plane (dashboard -> target backend) ---
 

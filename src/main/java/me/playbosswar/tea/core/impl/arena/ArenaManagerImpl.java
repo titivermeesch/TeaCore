@@ -164,6 +164,19 @@ public final class ArenaManagerImpl implements ArenaManager {
         ArenaImpl arena = arenas.get(id);
         if (arena == null)
             return;
+        // Match-end is only meaningful from LIVE — ending a match that hasn't
+        // gone live yet (e.g. the last player drops out during COUNTDOWN)
+        // shouldn't crown a winner. The lifecycle ticker handles
+        // COUNTDOWN -> WAITING aborts on its own; game plugins reacting to
+        // player-leave events shouldn't be able to short-circuit that with
+        // a stray endMatch(...) call.
+        if (arena.state() != ArenaState.LIVE) {
+            logger.warning("Ignoring endMatch on arena " + id.value()
+                    + " in state " + arena.state()
+                    + " (only valid from LIVE). Use arenaManager.release(id) to tear down "
+                    + "an arena that hasn't started.");
+            return;
+        }
         GameDefinition def = gameRegistry.get(arena.gameId()).orElse(null);
         if (def == null) {
             logger.log(Level.SEVERE,
@@ -249,6 +262,24 @@ public final class ArenaManagerImpl implements ArenaManager {
         world.setAutoSave(false);
         world.setKeepSpawnInMemory(false);
 
+        // Touch an empty data/raids.dat. Vanilla / Paper's world-save path
+        // tries to read this file on unload even when autoSave is off, and
+        // freshly-generated arena worlds never have any raids — so without
+        // the empty file, every match-end logs a noisy
+        // "java.nio.file.NoSuchFileException: ./tea_arena_<id>/data/raids.dat".
+        // Pre-creating a zero-byte file lets the save attempt no-op.
+        try {
+            Path dataDir = world.getWorldFolder().toPath().resolve("data");
+            Files.createDirectories(dataDir);
+            Path raids = dataDir.resolve("raids.dat");
+            if (!Files.exists(raids)) {
+                Files.createFile(raids);
+            }
+        } catch (IOException ioe) {
+            logger.log(Level.FINE,
+                    "Could not pre-create raids.dat for " + worldName + " (harmless): " + ioe.getMessage());
+        }
+
         world.setDifficulty(worldConfig.difficulty());
         world.setSpawnFlags(worldConfig.allowMonsters(), worldConfig.allowAnimals());
         for (var entry : worldConfig.gameRules().entrySet()) {
@@ -272,23 +303,40 @@ public final class ArenaManagerImpl implements ArenaManager {
     }
 
     private void teleportIn(ArenaImpl arena, Player player, boolean asSpectator) {
-        Optional<World> world = arena.world();
-        if (world.isEmpty())
-            return;
-        Optional<MapDefinition> mapDef = arena.mapId()
-                .flatMap(mid -> mapService.get(arena.gameId(), mid));
-        Location target;
-        if (mapDef.isPresent() && mapDef.get().waitingSpawn() != null) {
-            target = mapDef.get().waitingSpawn().toLocation(
-                    me.playbosswar.tea.core.impl.map.MapOrigin.in(world.get()));
-        } else {
-            target = new Location(world.get(), 0, 64, 0);
-        }
-        player.teleport(target);
+        Optional<Location> target = resolveWaitingSpawn(arena);
+        if (target.isEmpty()) return;
+        player.teleport(target.get());
         ArenaWorldConfig cfg = gameRegistry.get(arena.gameId())
                 .map(GameDefinition::arenaWorld)
                 .orElseGet(() -> ArenaWorldConfig.defaults().build());
         player.setGameMode(asSpectator ? cfg.spectatorGameMode() : cfg.playerGameMode());
+    }
+
+    /**
+     * Returns the location the matchmaker would teleport a joining player to
+     * for the given arena. Used both by {@link #teleportIn} and by the
+     * pre-spawn hook so a cross-server-routed player materializes directly
+     * in the arena's waiting room instead of flickering through the
+     * destination server's overworld first.
+     *
+     * @return the waiting-spawn location, or empty if the arena has no
+     *         live world yet (it may still be allocating).
+     */
+    public Optional<Location> resolveWaitingSpawn(ArenaId id) {
+        ArenaImpl arena = arenas.get(id);
+        return arena == null ? Optional.empty() : resolveWaitingSpawn(arena);
+    }
+
+    private Optional<Location> resolveWaitingSpawn(ArenaImpl arena) {
+        Optional<World> world = arena.world();
+        if (world.isEmpty()) return Optional.empty();
+        Optional<MapDefinition> mapDef = arena.mapId()
+                .flatMap(mid -> mapService.get(arena.gameId(), mid));
+        if (mapDef.isPresent() && mapDef.get().waitingSpawn() != null) {
+            return Optional.of(mapDef.get().waitingSpawn().toLocation(
+                    me.playbosswar.tea.core.impl.map.MapOrigin.in(world.get())));
+        }
+        return Optional.of(new Location(world.get(), 0, 64, 0));
     }
 
     void teleportOut(Player player, @Nullable ArenaImpl arena) {

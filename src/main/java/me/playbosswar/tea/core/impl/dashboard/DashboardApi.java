@@ -272,11 +272,15 @@ public final class DashboardApi {
             return;
         }
 
+        // Iterate persisted schemas (fleet-wide) and resolve to either the
+        // in-process provider or a generic DB-backed one. Lets the lobby's
+        // dashboard surface every game in the fleet, not only games whose
+        // plugin happens to be loaded on this server.
         Map<String, Map<String, String>> statsByGame = new LinkedHashMap<>();
-        for (StatsProvider sp : core.stats().all()) {
-            Map<String, String> entries = sp.fetch(uuid);
+        for (var schema : core.stats().allSchemas()) {
+            Map<String, String> entries = core.stats().providerFor(schema).fetch(uuid);
             if (!entries.isEmpty()) {
-                statsByGame.put(sp.gameId().value(), entries);
+                statsByGame.put(schema.gameId().value(), entries);
             }
         }
 
@@ -310,10 +314,19 @@ public final class DashboardApi {
             ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "invalid uuid"));
             return;
         }
+        // Prefer the in-process provider; fall back to a schema-driven generic
+        // provider so this works on a lobby with no game plugin loaded.
         StatsProvider provider = core.stats().forGame(gameId).orElse(null);
         if (provider == null) {
-            ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "no stats provider for " + gameId.value()));
-            return;
+            var schema = core.stats().allSchemas().stream()
+                    .filter(s -> s.gameId().equals(gameId))
+                    .findFirst()
+                    .orElse(null);
+            if (schema == null) {
+                ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "no stats schema for " + gameId.value()));
+                return;
+            }
+            provider = core.stats().providerFor(schema);
         }
         ctx.json(provider.fetch(uuid));
     }

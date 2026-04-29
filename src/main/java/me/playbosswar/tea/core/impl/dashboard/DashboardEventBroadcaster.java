@@ -1,5 +1,7 @@
 package me.playbosswar.tea.core.impl.dashboard;
 
+import static me.playbosswar.tea.core.impl.TeaCorePlugin.ERROR_TRACKER;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.websocket.WsContext;
 import java.util.HashMap;
@@ -104,6 +106,8 @@ public final class DashboardEventBroadcaster {
                     sessions.remove(ctx);
                 }
             } catch (Exception e) {
+                logger.log(Level.FINE, "Dashboard websocket send failed; dropping session", e);
+                ERROR_TRACKER.trackError(e);
                 sessions.remove(ctx);
             }
         }

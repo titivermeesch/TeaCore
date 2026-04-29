@@ -18,7 +18,23 @@ public record CoreConfig(
                 SQLITE, MYSQL
         }
 
-        public record NetworkConfig(NetworkMode mode, String serverId, String lobbyServer) {
+        /**
+         * @param mode               coordination mode for the fleet.
+         * @param serverId           this backend's id, used by the proxy and the
+         *                           coordination backend.
+         * @param lobbyServer        proxy-side name of the lobby (where players are
+         *                           sent at match end).
+         * @param eligibleMatchmaker whether this backend is allowed to acquire the
+         *                           matchmaker leader lock and run the cluster-wide
+         *                           pool manager. Default {@code true}, which is
+         *                           correct for standalone deployments. In central
+         *                           mode, set to {@code true} on the lobby and
+         *                           {@code false} on every arena backend so the
+         *                           lobby's {@code arena-pool.games} config is the
+         *                           single source of truth for pool sizing.
+         */
+        public record NetworkConfig(NetworkMode mode, String serverId, String lobbyServer,
+                        boolean eligibleMatchmaker) {
         }
 
         public record RedisConfig(String host, int port, String password) {

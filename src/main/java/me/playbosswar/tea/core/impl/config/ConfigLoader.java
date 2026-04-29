@@ -26,6 +26,7 @@ public final class ConfigLoader {
             "network.mode",
             "network.server-id",
             "network.lobby-server",
+            "network.eligible-matchmaker",
             "redis",
             "redis.host",
             "redis.port",
@@ -49,7 +50,18 @@ public final class ConfigLoader {
             "dashboard.admin-token",
             "arena-pool",
             "arena-pool.mode",
-            "arena-pool.games");
+            "arena-pool.games",
+            "lobby",
+            "lobby.enabled",
+            "lobby.manage-spawn",
+            "lobby.gamemode",
+            "lobby.spawn",
+            "lobby.spawn.world",
+            "lobby.spawn.x",
+            "lobby.spawn.y",
+            "lobby.spawn.z",
+            "lobby.spawn.yaw",
+            "lobby.spawn.pitch");
 
     private ConfigLoader() {
     }
@@ -60,7 +72,8 @@ public final class ConfigLoader {
         if (logger != null) {
             for (String key : yaml.getKeys(true)) {
                 // Dynamic sections (per-game pool overrides) aren't in KNOWN_KEYS.
-                if (key.startsWith("arena-pool.games.")) continue;
+                if (key.startsWith("arena-pool.games."))
+                    continue;
                 if (!KNOWN_KEYS.contains(key)) {
                     logger.warning("Unknown config key '" + key + "' in "
                             + configFile.getFileName() + " - check for a typo.");
@@ -75,7 +88,13 @@ public final class ConfigLoader {
         String rawServerId = yaml.getString("network.server-id", "auto");
         String serverId = resolveServerId(rawServerId);
         String lobbyServer = yaml.getString("network.lobby-server", "lobby");
-        CoreConfig.NetworkConfig network = new CoreConfig.NetworkConfig(mode, serverId, lobbyServer);
+        // Defaults to true: a single-server install needs to be its own
+        // matchmaker. In split central deployments, the operator flips this to
+        // false on every arena backend so the lobby is the only leader-eligible
+        // server and its arena-pool.games config drives sizing for the fleet.
+        boolean eligibleMatchmaker = yaml.getBoolean("network.eligible-matchmaker", true);
+        CoreConfig.NetworkConfig network = new CoreConfig.NetworkConfig(mode, serverId, lobbyServer,
+                eligibleMatchmaker);
 
         ConfigurationSection redisSection = section(yaml, "redis");
         CoreConfig.RedisConfig redis = new CoreConfig.RedisConfig(
@@ -143,7 +162,8 @@ public final class ConfigLoader {
         if (gamesSection != null) {
             for (String gameId : gamesSection.getKeys(false)) {
                 ConfigurationSection g = gamesSection.getConfigurationSection(gameId);
-                if (g == null) continue;
+                if (g == null)
+                    continue;
                 gamePools.put(gameId, new CoreConfig.GamePoolOverride(
                         g.getInt("min-available", -1),
                         g.getInt("max-total", -1),
@@ -170,7 +190,7 @@ public final class ConfigLoader {
     }
 
     private static String resolveServerId(String raw) {
-        if (raw != null && !raw.isBlank() && !"auto".equalsIgnoreCase(raw.trim())) {
+        if (raw != null && !raw.isBlank() && !raw.trim().equalsIgnoreCase("auto")) {
             return raw.trim();
         }
         String env = System.getenv("TEA_SERVER_ID");

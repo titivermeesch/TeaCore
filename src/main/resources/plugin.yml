@@ -23,6 +23,18 @@ commands:
     description: Open the kit picker or select a kit
     permission: tea.kit
     usage: /kit [game] [kitId]
+  leave:
+    description: Leave your current arena, or drop out of the matchmaker queue
+    permission: tea.arena.play
+    usage: /leave
+  stats:
+    description: Open the stats viewer GUI; admins can pass a player name
+    permission: tea.stats
+    usage: /stats [player]
+  play:
+    description: Queue for a game, optionally filtering by map (lobby feature)
+    permission: tea.lobby.play
+    usage: /play <game> [map]
 
 permissions:
   tea.admin:
@@ -38,8 +50,6 @@ permissions:
       tea.chat.global: true
       tea.map.admin: true
       tea.stats: true
-      tea.economy.balance: true
-      tea.economy.admin: true
   tea.reload:
     description: Reload TeaCore config, theme, and locale bundles
     default: op
@@ -70,9 +80,9 @@ permissions:
   tea.stats:
     description: View your own stats via /tea stats (admins with tea.admin can view other players)
     default: true
-  tea.economy.balance:
-    description: View your own balance via /tea economy balance
+  tea.lobby.play:
+    description: Queue for a game from the lobby via /play
     default: true
-  tea.economy.admin:
-    description: Give, take, set player balances, and view other players' balances via /tea economy
+  tea.lobby.admin:
+    description: Manage lobby connection signs, lobby spawn, and lobby config via /tealobby
     default: op

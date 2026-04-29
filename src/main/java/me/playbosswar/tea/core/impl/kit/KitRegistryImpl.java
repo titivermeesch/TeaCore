@@ -7,6 +7,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,7 +27,12 @@ import org.bukkit.inventory.PlayerInventory;
 public final class KitRegistryImpl implements KitRegistry {
 
     private final ConcurrentHashMap<GameId, ConcurrentHashMap<String, Supplier<Ability>>> abilityFactories = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<GameId, ConcurrentHashMap<String, Kit>> kits = new ConcurrentHashMap<>();
+    // Insertion-ordered per-game kit map so the kit picker GUI shows kits in
+    // the order they were registered (the game plugin's intent), not the
+    // hash-bucket order. Synchronized externally via the kits-mutex below
+    // since LinkedHashMap is not thread-safe.
+    private final java.util.concurrent.ConcurrentHashMap<GameId, java.util.LinkedHashMap<String, Kit>> kits = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Object kitsMutex = new Object();
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<GameId, String>> selections = new ConcurrentHashMap<>();
 
     private final DataSource dataSource;
@@ -45,20 +51,26 @@ public final class KitRegistryImpl implements KitRegistry {
 
     @Override
     public void registerKit(Kit kit) {
-        kits.computeIfAbsent(kit.gameId(), g -> new ConcurrentHashMap<>())
-                .put(kit.kitId(), kit);
+        synchronized (kitsMutex) {
+            kits.computeIfAbsent(kit.gameId(), g -> new java.util.LinkedHashMap<>())
+                    .put(kit.kitId(), kit);
+        }
     }
 
     @Override
     public Optional<Kit> kit(GameId gameId, String kitId) {
-        ConcurrentHashMap<String, Kit> forGame = kits.get(gameId);
-        return forGame == null ? Optional.empty() : Optional.ofNullable(forGame.get(kitId));
+        synchronized (kitsMutex) {
+            java.util.LinkedHashMap<String, Kit> forGame = kits.get(gameId);
+            return forGame == null ? Optional.empty() : Optional.ofNullable(forGame.get(kitId));
+        }
     }
 
     @Override
     public Collection<Kit> kitsFor(GameId gameId) {
-        ConcurrentHashMap<String, Kit> forGame = kits.get(gameId);
-        return forGame == null ? Collections.emptyList() : Collections.unmodifiableCollection(forGame.values());
+        synchronized (kitsMutex) {
+            java.util.LinkedHashMap<String, Kit> forGame = kits.get(gameId);
+            return forGame == null ? Collections.emptyList() : List.copyOf(forGame.values());
+        }
     }
 
     @Override

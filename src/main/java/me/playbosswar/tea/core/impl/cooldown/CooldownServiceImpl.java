@@ -132,6 +132,11 @@ public final class CooldownServiceImpl implements CooldownService, Listener {
             if (soonestActionBar != null) {
                 renderActionBar(p, soonestActionBar, now);
             }
+
+            Entry soonestProgressBar = soonest(perPlayer, CooldownDisplay.PROGRESS_BAR, now);
+            if (soonestProgressBar != null) {
+                renderProgressBar(p, soonestProgressBar, now);
+            }
         }
     }
 
@@ -165,6 +170,23 @@ public final class CooldownServiceImpl implements CooldownService, Listener {
         double seconds = remainingMs / 1000.0;
         Component component = Component.text(entry.label, NamedTextColor.AQUA)
                 .append(Component.text("  |  ", NamedTextColor.DARK_GRAY))
+                .append(Component.text(String.format("%.1fs", seconds), NamedTextColor.GOLD));
+        audiences.player(player).sendActionBar(component);
+    }
+
+    private void renderProgressBar(Player player, Entry entry, Instant now) {
+        long totalMs = Math.max(1, Duration.between(entry.startedAt, entry.endsAt).toMillis());
+        long remainingMs = Math.max(0, Duration.between(now, entry.endsAt).toMillis());
+        long elapsedMs = Math.max(0, totalMs - remainingMs);
+        int cells = 10;
+        int filled = (int) Math.round((double) elapsedMs / totalMs * cells);
+        StringBuilder bar = new StringBuilder(cells);
+        for (int i = 0; i < cells; i++) bar.append(i < filled ? '\u2588' : '\u2591');
+        double seconds = remainingMs / 1000.0;
+        Component component = Component.text(entry.label, NamedTextColor.AQUA)
+                .append(Component.text("  ", NamedTextColor.DARK_GRAY))
+                .append(Component.text(bar.toString(), NamedTextColor.GOLD))
+                .append(Component.text("  ", NamedTextColor.DARK_GRAY))
                 .append(Component.text(String.format("%.1fs", seconds), NamedTextColor.GOLD));
         audiences.player(player).sendActionBar(component);
     }

@@ -31,8 +31,7 @@ public final class VaultEconomyService implements EconomyService {
     }
 
     private static Economy resolveProvider(Logger logger) {
-        RegisteredServiceProvider<Economy> rsp =
-                Bukkit.getServicesManager().getRegistration(Economy.class);
+        RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
         if (rsp == null) {
             logger.warning("Vault is installed but no economy provider is registered. "
                     + "Install an economy plugin (EssentialsEco, CMI, etc.) or kit purchases and "
@@ -50,7 +49,8 @@ public final class VaultEconomyService implements EconomyService {
 
     @Override
     public double balance(UUID playerId) {
-        if (economy == null || playerId == null) return 0;
+        if (economy == null || playerId == null)
+            return 0;
         try {
             OfflinePlayer target = Bukkit.getOfflinePlayer(playerId);
             return economy.getBalance(target);
@@ -62,7 +62,8 @@ public final class VaultEconomyService implements EconomyService {
 
     @Override
     public boolean has(UUID playerId, double amount) {
-        if (economy == null || playerId == null || amount < 0) return false;
+        if (economy == null || playerId == null || amount < 0)
+            return false;
         try {
             OfflinePlayer target = Bukkit.getOfflinePlayer(playerId);
             return economy.has(target, amount);
@@ -74,7 +75,8 @@ public final class VaultEconomyService implements EconomyService {
 
     @Override
     public boolean deposit(UUID playerId, double amount) {
-        if (economy == null || playerId == null || amount < 0) return false;
+        if (economy == null || playerId == null || amount < 0)
+            return false;
         try {
             OfflinePlayer target = Bukkit.getOfflinePlayer(playerId);
             EconomyResponse r = economy.depositPlayer(target, amount);
@@ -87,7 +89,8 @@ public final class VaultEconomyService implements EconomyService {
 
     @Override
     public boolean withdraw(UUID playerId, double amount) {
-        if (economy == null || playerId == null || amount < 0) return false;
+        if (economy == null || playerId == null || amount < 0)
+            return false;
         try {
             OfflinePlayer target = Bukkit.getOfflinePlayer(playerId);
             EconomyResponse r = economy.withdrawPlayer(target, amount);
@@ -100,16 +103,19 @@ public final class VaultEconomyService implements EconomyService {
 
     @Override
     public boolean set(UUID playerId, double amount) {
-        if (economy == null || playerId == null || amount < 0) return false;
+        if (economy == null || playerId == null || amount < 0)
+            return false;
         double current = balance(playerId);
         double delta = amount - current;
-        if (delta == 0) return true;
+        if (delta == 0)
+            return true;
         return delta > 0 ? deposit(playerId, delta) : withdraw(playerId, -delta);
     }
 
     @Override
     public String format(double amount) {
-        if (economy == null) return String.valueOf(amount);
+        if (economy == null)
+            return String.valueOf(amount);
         try {
             return economy.format(amount);
         } catch (Throwable t) {

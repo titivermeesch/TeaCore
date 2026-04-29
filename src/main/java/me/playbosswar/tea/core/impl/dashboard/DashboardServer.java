@@ -39,7 +39,7 @@ public final class DashboardServer {
     private BukkitTask queueTicker;
 
     public DashboardServer(TeaCorePlugin plugin, TeaCoreAPI core,
-                           CoreConfig.DashboardConfig config, Logger logger) {
+            CoreConfig.DashboardConfig config, Logger logger) {
         this.plugin = plugin;
         this.core = core;
         this.config = config;
@@ -127,7 +127,8 @@ public final class DashboardServer {
     }
 
     private void pushQueueCounts() {
-        if (broadcaster == null || broadcaster.sessionCount() == 0) return;
+        if (broadcaster == null || broadcaster.sessionCount() == 0)
+            return;
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (GameDefinition def : core.games().all()) {
             counts.put(def.id().value(), core.coordination().queueFor(def.id()).size());
@@ -142,7 +143,8 @@ public final class DashboardServer {
         }
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String candidate = authHeader.substring("Bearer ".length()).trim();
-            if (constantTimeEquals(candidate, expected)) return true;
+            if (constantTimeEquals(candidate, expected))
+                return true;
         }
         if (tokenQuery != null && constantTimeEquals(tokenQuery, expected)) {
             return true;
@@ -151,7 +153,8 @@ public final class DashboardServer {
     }
 
     private static boolean constantTimeEquals(String a, String b) {
-        if (a.length() != b.length()) return false;
+        if (a.length() != b.length())
+            return false;
         int diff = 0;
         for (int i = 0; i < a.length(); i++) {
             diff |= a.charAt(i) ^ b.charAt(i);

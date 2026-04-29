@@ -49,4 +49,39 @@ public interface StatsRegistry {
      * @return a snapshot collection, never {@code null}.
      */
     Collection<StatsProvider> all();
+
+    /**
+     * Persists a stats schema in the shared database so other servers in the
+     * fleet (notably the lobby) can render this game's stats without having
+     * the game's own provider class on their classpath.
+     *
+     * <p>Game plugins call this once in {@code onEnable}, alongside
+     * {@link #register(StatsProvider)}. Re-registering with the same
+     * {@link GameId} replaces the previous schema in full.
+     *
+     * @param schema schema to persist; must not be {@code null}.
+     */
+    void registerSchema(StatsSchema schema);
+
+    /**
+     * Returns every persisted schema, read from the shared database. Includes
+     * schemas registered on other servers, so a lobby sees every game in the
+     * fleet that has ever called {@link #registerSchema(StatsSchema)}.
+     *
+     * @return schema snapshot; never {@code null}.
+     */
+    Collection<StatsSchema> allSchemas();
+
+    /**
+     * Resolves the effective provider for a schema. Returns the in-memory
+     * provider registered via {@link #register(StatsProvider)} when one exists
+     * (so games keep using their custom logic on their own servers), and falls
+     * back to a generic database-backed provider built from the schema
+     * otherwise (so a lobby with no game plugins can still render the GUI).
+     *
+     * @param schema schema to resolve; must not be {@code null}.
+     * @return a provider that can {@link StatsProvider#fetch(java.util.UUID) fetch} stats
+     *         for the schema's game; never {@code null}.
+     */
+    StatsProvider providerFor(StatsSchema schema);
 }

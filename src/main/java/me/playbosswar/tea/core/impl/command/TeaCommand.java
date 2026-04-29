@@ -21,13 +21,10 @@ import org.bukkit.entity.Player;
 public final class TeaCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> TOP_LEVEL = List.of(
-            "reload", "version", "help", "arena", "game", "map", "stats", "economy");
+            "reload", "version", "help", "arena", "game", "map", "stats", "lobby");
 
     private static final List<String> ARENA_SUBS = List.of(
             "list", "allocate", "join", "spectate", "observe", "leave", "release", "start");
-
-    private static final List<String> ECONOMY_SUBS = List.of(
-            "balance", "give", "take", "set");
 
     private final TeaCorePlugin plugin;
     private final TeaMapCommand mapCommand;
@@ -51,7 +48,7 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
             case "game" -> handleGame(sender, args);
             case "map" -> mapCommand.handle(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
             case "stats" -> handleStats(sender, args);
-            case "economy" -> handleEconomy(sender, args);
+            case "lobby" -> handleLobby(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
             default -> plugin.messageService().sendToSender(sender, "core.command.unknown");
         }
         return true;
@@ -87,14 +84,10 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         if ("map".equalsIgnoreCase(args[0])) {
             return mapCommand.complete(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         }
-        if ("economy".equalsIgnoreCase(args[0])) {
-            if (args.length == 2) return filter(ECONOMY_SUBS, args[1]);
-            if (args.length == 3 && !"balance".equalsIgnoreCase(args[1])) {
-                return plugin.getServer().getOnlinePlayers().stream()
-                        .map(org.bukkit.entity.Player::getName)
-                        .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(args[2].toLowerCase(Locale.ROOT)))
-                        .toList();
-            }
+        if ("lobby".equalsIgnoreCase(args[0])) {
+            var lobby = plugin.lobbyAdminCommand();
+            if (lobby == null) return List.of();
+            return lobby.complete(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         }
         return List.of();
     }
@@ -353,11 +346,14 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
 
         ms.sendToSender(sender, "core.stats.header", Map.of("player", targetName));
         int shown = 0;
-        for (var provider : plugin.stats().all()) {
-            Map<String, String> entries = provider.fetch(targetUuid);
+        // Iterate persisted schemas so a lobby (which has no in-process providers)
+        // still shows every game in the fleet. providerFor falls back to a generic
+        // DB-backed provider when no native one is registered locally.
+        for (var schema : plugin.stats().allSchemas()) {
+            Map<String, String> entries = plugin.stats().providerFor(schema).fetch(targetUuid);
             if (entries == null || entries.isEmpty())
                 continue;
-            ms.sendToSender(sender, "core.stats.game", Map.of("game", provider.gameId().value()));
+            ms.sendToSender(sender, "core.stats.game", Map.of("game", schema.gameId().value()));
             for (Map.Entry<String, String> entry : entries.entrySet()) {
                 ms.sendToSender(sender, "core.stats.entry",
                         Map.of("label", entry.getKey(), "value", entry.getValue()));
@@ -369,97 +365,13 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         }
     }
 
-    private void handleEconomy(CommandSender sender, String[] args) {
-        MessageService ms = plugin.messageService();
-        var economy = plugin.economy();
-        if (economy == null || !economy.isAvailable()) {
-            ms.sendToSender(sender, "core.economy.unavailable");
+    private void handleLobby(CommandSender sender, String[] args) {
+        var lobby = plugin.lobbyAdminCommand();
+        if (lobby == null) {
+            plugin.messageService().sendToSender(sender, "core.command.lobby-disabled");
             return;
         }
-        if (args.length < 2) {
-            ms.sendToSender(sender, "core.economy.usage");
-            return;
-        }
-        switch (args[1].toLowerCase(Locale.ROOT)) {
-            case "balance" -> economyBalance(sender, args);
-            case "give" -> economyAdjust(sender, args, EconomyOp.GIVE);
-            case "take" -> economyAdjust(sender, args, EconomyOp.TAKE);
-            case "set" -> economyAdjust(sender, args, EconomyOp.SET);
-            default -> ms.sendToSender(sender, "core.economy.usage");
-        }
-    }
-
-    private void economyBalance(CommandSender sender, String[] args) {
-        MessageService ms = plugin.messageService();
-        var economy = plugin.economy();
-        UUID targetUuid;
-        String targetName;
-        if (args.length >= 3) {
-            if (!sender.hasPermission("tea.economy.admin")) {
-                ms.sendToSender(sender, "core.command.no-permission");
-                return;
-            }
-            org.bukkit.OfflinePlayer target = plugin.getServer().getOfflinePlayer(args[2]);
-            targetUuid = target.getUniqueId();
-            targetName = target.getName() == null ? args[2] : target.getName();
-        } else if (sender instanceof Player self) {
-            if (!sender.hasPermission("tea.economy.balance")) {
-                ms.sendToSender(sender, "core.command.no-permission");
-                return;
-            }
-            targetUuid = self.getUniqueId();
-            targetName = self.getName();
-        } else {
-            ms.sendToSender(sender, "core.economy.balance.usage");
-            return;
-        }
-        double balance = economy.balance(targetUuid);
-        ms.sendToSender(sender, "core.economy.balance.result", Map.of(
-                "player", targetName,
-                "amount", economy.format(balance)));
-    }
-
-    private enum EconomyOp { GIVE, TAKE, SET }
-
-    private void economyAdjust(CommandSender sender, String[] args, EconomyOp op) {
-        MessageService ms = plugin.messageService();
-        if (!sender.hasPermission("tea.economy.admin")) {
-            ms.sendToSender(sender, "core.command.no-permission");
-            return;
-        }
-        if (args.length < 4) {
-            ms.sendToSender(sender, "core.economy." + op.name().toLowerCase(Locale.ROOT) + ".usage");
-            return;
-        }
-        org.bukkit.OfflinePlayer target = plugin.getServer().getOfflinePlayer(args[2]);
-        double amount;
-        try {
-            amount = Double.parseDouble(args[3]);
-        } catch (NumberFormatException e) {
-            ms.sendToSender(sender, "core.economy.invalid-amount", Map.of("value", args[3]));
-            return;
-        }
-        if (amount < 0) {
-            ms.sendToSender(sender, "core.economy.invalid-amount", Map.of("value", args[3]));
-            return;
-        }
-        var economy = plugin.economy();
-        boolean ok = switch (op) {
-            case GIVE -> economy.deposit(target.getUniqueId(), amount);
-            case TAKE -> economy.withdraw(target.getUniqueId(), amount);
-            case SET -> economy.set(target.getUniqueId(), amount);
-        };
-        String targetName = target.getName() == null ? args[2] : target.getName();
-        if (ok) {
-            ms.sendToSender(sender, "core.economy." + op.name().toLowerCase(Locale.ROOT) + ".success",
-                    Map.of(
-                            "player", targetName,
-                            "amount", economy.format(amount),
-                            "balance", economy.format(economy.balance(target.getUniqueId()))));
-        } else {
-            ms.sendToSender(sender, "core.economy.operation-failed",
-                    Map.of("player", targetName));
-        }
+        lobby.handle(sender, args);
     }
 
     private void handleGame(CommandSender sender, String[] args) {

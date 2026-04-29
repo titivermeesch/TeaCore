@@ -222,6 +222,24 @@ public final class RedisBackend implements CoordinationBackend {
     }
 
     @Override
+    public java.util.Optional<QueueEntry> queueEntryOf(UUID playerUuid) {
+        try {
+            for (String key : redis.keys("tea:queue:*")) {
+                String gameValue = key.substring("tea:queue:".length());
+                GameId gameId = GameId.of(gameValue);
+                for (String member : redis.zrange(key, 0, -1)) {
+                    QueueEntry e = decodeEntry(gameId, member);
+                    if (e != null && e.playerUuid().equals(playerUuid))
+                        return java.util.Optional.of(e);
+                }
+            }
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to look up queue entry for " + playerUuid, e);
+        }
+        return java.util.Optional.empty();
+    }
+
+    @Override
     public void publishHostedGames(java.util.Set<GameId> gameIds) {
         String key = HOSTS_PREFIX + serverId;
         try {
@@ -247,6 +265,21 @@ public final class RedisBackend implements CoordinationBackend {
             }
         } catch (Exception e) {
             logger.log(Level.WARNING, "Failed to read host set for " + gameId, e);
+        }
+        return out;
+    }
+
+    @Override
+    public java.util.Set<GameId> allHostedGames() {
+        java.util.Set<GameId> out = new java.util.HashSet<>();
+        try {
+            for (String key : redis.keys(HOSTS_PREFIX + "*")) {
+                for (String value : redis.smembers(key)) {
+                    if (value != null && !value.isBlank()) out.add(GameId.of(value));
+                }
+            }
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to read fleet-wide hosted-games set", e);
         }
         return out;
     }

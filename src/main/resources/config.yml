@@ -2,6 +2,13 @@ network:
   mode: standalone            # standalone | bungeecord | multi-server
   server-id: auto             # unique id for this backend; "auto" reads $TEA_SERVER_ID or falls back to random
   lobby-server: lobby         # name of the lobby backend (used on match-end and kick-out)
+  # When true (default), this backend is allowed to acquire the matchmaker
+  # leader lock and run the cluster-wide arena pool manager. Standalone
+  # deployments should leave this as true. In a central / multi-server split,
+  # set this to true ONLY on the lobby and to false on every arena backend so
+  # the lobby's arena-pool.games config below is the single source of truth
+  # for pool sizing in the fleet.
+  eligible-matchmaker: true
 
 redis:
   host: localhost
@@ -57,3 +64,32 @@ dashboard:
   # Admin token for API auth. Leave blank on first boot to auto-generate one;
   # the generated value is written back to this file and printed to console.
   admin-token: ""
+
+# ----------------------------------------------------------------------
+# Lobby features (formerly the separate TeaLobby plugin).
+# Enable on the server(s) you want to act as the hub: connection signs,
+# /play and the lobby spawn / gamemode auto-management. On arena-only
+# backends, leave enabled: false.
+# ----------------------------------------------------------------------
+lobby:
+  enabled: false
+
+  # When false, the lobby will not touch a player's location or gamemode
+  # when they join the server or respawn. Turn this off if another hub
+  # plugin manages spawn.
+  manage-spawn: true
+
+  # Gamemode applied on join / respawn when manage-spawn is true.
+  # One of: SURVIVAL, CREATIVE, ADVENTURE, SPECTATOR.
+  gamemode: ADVENTURE
+
+  # Spawn location. Defaults to the server's world spawn if no spawn is
+  # configured. Use /tea lobby spawn set to write your current location
+  # into this file.
+  spawn:
+    world: ""
+    x: 0.5
+    y: 65.0
+    z: 0.5
+    yaw: 0.0
+    pitch: 0.0

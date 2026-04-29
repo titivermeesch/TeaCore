@@ -2,7 +2,7 @@
 
 A reusable minigame engine for Paper/Spigot servers. TeaCore handles the scaffolding every PvP minigame needs — arena lifecycle, in-game map authoring, kits, abilities, cooldowns, chat routing, stats persistence, i18n, theming, proxy handoff, matchmaking, and an embedded web dashboard — so game plugins can focus on gameplay.
 
-TeaCore is consumed by separate game plugin jars (for example TeaLobby and published minigame plugins) that declare `depend: [TeaCore]` and register a `GameDefinition` at enable time.
+TeaCore is consumed by separate game plugin jars that declare `depend: [TeaCore]` and register a `GameDefinition` at enable time. The hub-side lobby UI (connection signs, `/play`, lobby spawn management) is bundled inside TeaCore behind a `lobby.enabled` config toggle — flip it on for the server(s) you want to act as your lobby and leave it off elsewhere.
 
 Full user and developer documentation: [TeaDocs](https://titivermeesch.github.io/TeaDocs/).
 

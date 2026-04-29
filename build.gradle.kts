@@ -19,6 +19,7 @@ repositories {
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
     maven("https://oss.sonatype.org/content/repositories/snapshots/")
     maven("https://maven.enginehub.org/repo/")
+    maven("https://repo.faststats.dev/releases")
     // VaultAPI is published via JitPack (hard runtime dep; shipped by the
     // server admin, not shaded into our jar).
     maven("https://jitpack.io")
@@ -62,6 +63,9 @@ dependencies {
     implementation(libs.jackson.databind)
     implementation(libs.sqlite.jdbc)
     implementation(libs.mysql.connector)
+    // FastStats — error tracking + custom metrics, shaded with relocation so
+    // it can't collide with another plugin's copy.
+    implementation("dev.faststats.metrics:bukkit:0.22.0")
 
     testImplementation("org.spigotmc:spigot-api:$spigotApiVersion")
     testImplementation(libs.junit.jupiter)
@@ -113,6 +117,7 @@ tasks.shadowJar {
     relocate("com.fasterxml.jackson", "$base.jackson")
     relocate("org.jetbrains.annotations", "$base.annotations")
     relocate("kotlin", "$base.kotlin")
+    relocate("dev.faststats", "$base.faststats")
     // org.sqlite.* is intentionally NOT relocated: the native .so binds JNI
     // symbols to the original package name and relocating breaks at connect.
 }

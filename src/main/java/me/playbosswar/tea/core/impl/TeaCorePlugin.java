@@ -1,5 +1,8 @@
 package me.playbosswar.tea.core.impl;
 
+import dev.faststats.bukkit.BukkitMetrics;
+import dev.faststats.core.ErrorTracker;
+import dev.faststats.core.data.Metric;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -70,7 +73,15 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private static final List<String> BUNDLED_LOCALES = List.of("en_US");
     private static final List<String> CORE_MIGRATIONS = List.of(
             "V001__init.sql",
-            "V002__kit_unlocks.sql");
+            "V002__kit_unlocks.sql",
+            "V003__lobby_signs.sql",
+            "V004__stats_schemas.sql");
+
+    /**
+     * FastStats error tracker. Context-aware so it only captures throwables from
+     * TeaCore's classloader, never from other plugins running in the same JVM.
+     */
+    public static final ErrorTracker ERROR_TRACKER = ErrorTracker.contextAware();
 
     private CoreConfig config;
     private ThemeImpl theme;
@@ -87,6 +98,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private KitRegistryImpl kitRegistry;
     private CooldownServiceImpl cooldownService;
     private VaultEconomyService economyService;
+    private me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand;
     private EffectServiceImpl effectService;
     private ChatRouterImpl chatRouterImpl;
     private MatchBroadcasterImpl matchBroadcasterImpl;
@@ -100,8 +112,34 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private StatsRegistryImpl statsRegistry;
     private QueueBossbarService queueBossbarService;
 
+    // Declared after the fields it reads so suppliers don't trip Java's
+    // forward-reference rule. Suppliers themselves run lazily on each FastStats
+    // flush (~30 min), well after onEnable, so reading getConfig() and instance
+    // fields is safe even though this is a field initializer.
+    private final BukkitMetrics metrics = BukkitMetrics.factory()
+            .token("3094ede1b35f5b42406db8387caaa65c")
+            .errorTracker(ERROR_TRACKER)
+            .addMetric(Metric.string("database_type",
+                    () -> getConfig().getString("database.type", "sqlite")))
+            .addMetric(Metric.bool("dashboard_enabled",
+                    () -> getConfig().getBoolean("dashboard.enabled", true)))
+            .addMetric(Metric.string("network_mode",
+                    () -> getConfig().getString("network.mode", "standalone")))
+            .addMetric(Metric.string("arena_pool_mode",
+                    () -> getConfig().getString("arena-pool.mode", "standalone")))
+            .addMetric(Metric.string("default_locale",
+                    () -> getConfig().getString("i18n.default-locale", "en_US")))
+            .addMetric(Metric.string("coordination_backend", () -> {
+                if (coordinationBackend == null) return "uninitialized";
+                return coordinationBackend instanceof RedisBackend ? "redis" : "in_memory";
+            }))
+            .addMetric(Metric.number("registered_games_count",
+                    () -> gameRegistry == null ? 0 : gameRegistry.all().size()))
+            .create(this);
+
     @Override
     public void onEnable() {
+        metrics.ready();
         try {
             saveDefaultResources();
             loadConfigAndTheme();
@@ -161,7 +199,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 }
             });
             this.effectService = new EffectServiceImpl();
-            this.statsRegistry = new StatsRegistryImpl();
+            this.statsRegistry = new StatsRegistryImpl(databaseService.dataSource(), getLogger());
 
             this.chatRouterImpl = new ChatRouterImpl(arenaManager, teamManager);
             this.matchBroadcasterImpl = new MatchBroadcasterImpl(messageService);
@@ -169,8 +207,6 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             getServer().getPluginManager().registerEvents(cooldownService, this);
             getServer().getPluginManager().registerEvents(
                     new AbilityTriggerListener(kitRegistry, arenaManager, cooldownService), this);
-            getServer().getPluginManager()
-                    .registerEvents(new ArenaDisconnectListener(arenaManager), this);
             getServer().getPluginManager().registerEvents(chatRouterImpl, this);
 
             KitSelectorGui kitSelectorGui = new KitSelectorGui(this, kitRegistry, messageService, economyService);
@@ -184,8 +220,20 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             // Must come before the pool manager - pool manager reads from it in
             // central mode.
             this.coordinationBackend = createCoordinationBackend();
+            this.proxyTransport = new BungeeChannelTransport(this);
+            // Build the matchmaker before the disconnect listener so the
+            // listener can ask "is this player mid-routing?" and skip the
+            // queue dequeue during a proxy hop.
+            this.matchmaker = new Matchmaker(this, coordinationBackend, gameRegistry, arenaManager, proxyTransport);
+            // Disconnect handling: clean up the player's arena membership AND
+            // drop their queue entry so a reconnect doesn't auto-route into a
+            // stale match. The matchmaker reference lets us recognize a
+            // legitimate cross-server hop and skip the dequeue in that case.
+            getServer().getPluginManager().registerEvents(
+                    new ArenaDisconnectListener(arenaManager, coordinationBackend, matchmaker), this);
             this.poolManager = new ArenaPoolManager(this, arenaManager, gameRegistry, mapService,
-                    coordinationBackend, config.arenaPool(), getLogger());
+                    coordinationBackend, config.arenaPool(),
+                    config.network().eligibleMatchmaker(), getLogger());
             this.poolManager.start();
 
             this.heartbeater = new ArenaHeartbeater(this, arenaManager, coordinationBackend);
@@ -200,8 +248,10 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                     new me.playbosswar.tea.core.impl.coordination.LocalEventMirror(coordinationBackend), this);
             new me.playbosswar.tea.core.impl.coordination.ControlExecutor(
                     this, coordinationBackend, getLogger()).start();
-            this.proxyTransport = new BungeeChannelTransport(this);
-            this.matchmaker = new Matchmaker(this, coordinationBackend, gameRegistry, arenaManager, proxyTransport);
+            // Matchmaker also listens for PlayerJoinEvent so it can route a
+            // queued player into an arena immediately on arrival from a proxy
+            // hop, instead of waiting up to 1s for the next scheduled tick.
+            getServer().getPluginManager().registerEvents(this.matchmaker, this);
             this.matchmaker.start();
 
             this.queueBossbarService = new QueueBossbarService(this, coordinationBackend, gameRegistry, messageService);
@@ -214,26 +264,85 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 teaCommand.setExecutor(exec);
                 teaCommand.setTabCompleter(exec);
             }
-            PluginCommand chatCommand = getCommand("chat");
-            if (chatCommand != null) {
-                TeaChatCommand exec = new TeaChatCommand(this);
-                chatCommand.setExecutor(exec);
-                chatCommand.setTabCompleter(exec);
+            // /chat exists to switch between match/team/staff/global channels and
+            // is meaningless on a lobby (no in-progress match, no team). When
+            // lobby.enabled is true we hide it from the command map entirely so
+            // tab-complete and /help don't surface a no-op.
+            boolean lobbyEnabled = getConfig().getBoolean("lobby.enabled", false);
+            if (lobbyEnabled) {
+                me.playbosswar.tea.core.impl.command.CommandRegistrar.unregister("chat", getLogger());
+            } else {
+                PluginCommand chatCommand = getCommand("chat");
+                if (chatCommand != null) {
+                    TeaChatCommand exec = new TeaChatCommand(this);
+                    chatCommand.setExecutor(exec);
+                    chatCommand.setTabCompleter(exec);
+                }
             }
             PluginCommand kitCommand = getCommand("kit");
             if (kitCommand != null) {
-                me.playbosswar.tea.core.impl.command.KitCommand exec =
-                        new me.playbosswar.tea.core.impl.command.KitCommand(this, kitSelectorGui);
+                me.playbosswar.tea.core.impl.command.KitCommand exec = new me.playbosswar.tea.core.impl.command.KitCommand(
+                        this, kitSelectorGui);
                 kitCommand.setExecutor(exec);
                 kitCommand.setTabCompleter(exec);
             }
+            PluginCommand leaveCommand = getCommand("leave");
+            if (leaveCommand != null) {
+                me.playbosswar.tea.core.impl.command.LeaveCommand exec = new me.playbosswar.tea.core.impl.command.LeaveCommand(
+                        this);
+                leaveCommand.setExecutor(exec);
+                leaveCommand.setTabCompleter(exec);
+            }
+            me.playbosswar.tea.core.impl.stats.PlayerStatsGui statsGui = new me.playbosswar.tea.core.impl.stats.PlayerStatsGui(
+                    this, statsRegistry, messageService);
+            getServer().getPluginManager()
+                    .registerEvents(new me.playbosswar.tea.core.impl.stats.PlayerStatsListener(), this);
+            PluginCommand statsCommand = getCommand("stats");
+            if (statsCommand != null) {
+                var exec = new me.playbosswar.tea.core.impl.command.PlayerStatsCommand(this, statsGui);
+                statsCommand.setExecutor(exec);
+                statsCommand.setTabCompleter(exec);
+            }
             this.dashboardServer = new DashboardServer(this, this, config.dashboard(), getLogger());
             this.dashboardServer.start();
+
+            // Optional lobby features (formerly TeaLobby plugin). Gated by
+            // lobby.enabled in config.yml — disabled by default so a fresh
+            // TeaCore install on an arena server isn't surprised. Enable on
+            // each lobby/hub server that needs /play, connection signs,
+            // spawn auto-management.
+            if (lobbyEnabled) {
+                me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService signService = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService(
+                        databaseService.dataSource(), getLogger());
+                signService.loadAll();
+                me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater signUpdater = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater(
+                        this, this, signService);
+                signUpdater.start();
+                getServer().getPluginManager().registerEvents(
+                        new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignListener(this, signService), this);
+
+                me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService spawnService = new me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService(
+                        this, this);
+                getServer().getPluginManager().registerEvents(spawnService, this);
+
+                PluginCommand playCommand = getCommand("play");
+                if (playCommand != null) {
+                    var exec = new me.playbosswar.tea.core.impl.lobby.command.PlayCommand(this, this);
+                    playCommand.setExecutor(exec);
+                    playCommand.setTabCompleter(exec);
+                }
+                // Lobby admin handler is dispatched via /tea lobby ... (see TeaCommand);
+                // there is no longer a top-level /tealobby command.
+                this.lobbyAdminCommand = new me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand(
+                        this, this, signService, spawnService);
+                getLogger().info("Lobby features enabled.");
+            }
 
             TeaCoreAPI.set(this);
             getLogger().info("TeaCore enabled (v" + getDescription().getVersion() + ")");
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "TeaCore failed to start", e);
+            ERROR_TRACKER.trackError(e);
             getServer().getPluginManager().disablePlugin(this);
         }
     }
@@ -284,6 +393,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             }
         } catch (Exception e) {
             getLogger().log(Level.WARNING, "Failed to release arenas cleanly", e);
+            ERROR_TRACKER.trackError(e);
         }
         try {
             if (coordinationBackend != null)
@@ -300,6 +410,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 messageService.close();
         } catch (Exception ignored) {
         }
+        try {
+            metrics.shutdown();
+        } catch (Exception e) {
+            getLogger().log(Level.WARNING, "Error shutting down FastStats metrics", e);
+        }
         getLogger().info("TeaCore disabled");
     }
 
@@ -314,6 +429,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         } catch (Exception e) {
             getLogger().log(Level.SEVERE,
                     "Redis coordination failed; falling back to in-memory backend. Cross-server features disabled.", e);
+            ERROR_TRACKER.trackError(e);
             return new InMemoryBackend(serverId);
         }
     }
@@ -342,14 +458,24 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     }
 
     /**
+     * Lobby admin handler (`/tealobby` and `/tea lobby`); null when
+     * {@code lobby.enabled} is false.
+     */
+    public me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand() {
+        return lobbyAdminCommand;
+    }
+
+    /**
      * Pushes the set of registered games for this backend into the coordination
      * backend. Called on every game register/unregister and from a 20s heartbeat
      * so Redis TTL entries don't expire.
      */
     private void publishHostedGames() {
-        if (coordinationBackend == null || gameRegistry == null) return;
+        if (coordinationBackend == null || gameRegistry == null)
+            return;
         java.util.Set<me.playbosswar.tea.core.api.game.GameId> ids = new java.util.HashSet<>();
-        for (var def : gameRegistry.all()) ids.add(def.id());
+        for (var def : gameRegistry.all())
+            ids.add(def.id());
         coordinationBackend.publishHostedGames(ids);
     }
 

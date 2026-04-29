@@ -8,6 +8,7 @@ core:
     no-permission: "<error>You don't have permission to use that.</error>"
     unknown: "<error>Unknown subcommand. Try </error><accent>/tea help</accent><error>.</error>"
     player-only: "<error>This command can only be run by a player.</error>"
+    lobby-disabled: "<error>Lobby features are disabled on this server.</error> <muted>Set </muted><accent>lobby.enabled: true</accent><muted> in </muted><accent>plugins/TeaCore/config.yml</accent><muted> and restart.</muted>"
   help:
     header: "<primary><bold>TeaCore commands</bold></primary>"
     entry: "<accent>/tea <cmd></accent> <muted>-</muted> <secondary><desc></secondary>"
@@ -161,31 +162,76 @@ core:
     usage: "<secondary>Usage:</secondary> <accent>/chat <match|team|staff|global></accent>"
     unknown-channel: "<error>Unknown channel </error><accent><channel></accent><error>.</error>"
     active-channel: "<success>Active chat channel:</success> <accent><channel></accent>"
+  leave:
+    success: "<success>You left the arena.</success>"
+    dequeued: "<success>Dropped out of the matchmaker queue.</success>"
+    nothing-to-leave: "<warning>You're not in an arena or a queue.</warning>"
   stats:
     usage: "<secondary>Usage:</secondary> <accent>/tea stats [player]</accent>"
     header: "<primary><bold>Stats for <player></bold></primary>"
     game: "<accent><game></accent>"
-    entry: "<muted>  <label></muted><secondary>:</secondary> <highlight><value></highlight>"
-    empty: "<muted>(no stats recorded)</muted>"
+    entry: "<secondary>  <label></secondary><muted>:</muted> <highlight><value></highlight>"
+    empty: "<secondary>(no stats recorded)</secondary>"
+    gui:
+      title: "<player>'s stats"
+      summary:
+        name: "<primary><bold><player></bold></primary>"
+        lore: "<secondary>Tracked in <highlight><with></highlight><secondary>/</secondary><highlight><total></highlight> <secondary>games.</secondary>"
+      game:
+        name: "<accent><bold><game></bold></accent>"
+        entry: "<secondary><label></secondary><muted>:</muted> <highlight><value></highlight>"
+        empty: "<secondary>No stats recorded yet.</secondary>"
+      close: "<error>Close</error>"
   game:
     list:
       header: "<primary><bold>Registered games</bold></primary>"
       empty: "<muted>(no games registered)</muted>"
       entry: "<accent><id></accent> <muted>maps=</muted><maps> <muted>teams=</muted><primary><teams></primary>"
-  economy:
-    usage: "<secondary>Usage:</secondary> <accent>/tea economy <balance|give|take|set></accent>"
-    unavailable: "<error>No economy provider is registered. Install a Vault-compatible economy plugin.</error>"
-    invalid-amount: "<error>Invalid amount:</error> <accent><value></accent>"
-    operation-failed: "<error>Economy operation failed for</error> <accent><player></accent>"
-    balance:
-      usage: "<secondary>Usage:</secondary> <accent>/tea economy balance [player]</accent>"
-      result: "<primary><player></primary><secondary>'s balance:</secondary> <highlight><amount></highlight>"
-    give:
-      usage: "<secondary>Usage:</secondary> <accent>/tea economy give <player> <amount></accent>"
-      success: "<success>Gave</success> <highlight><amount></highlight> <success>to</success> <accent><player></accent> <muted>(new balance: <balance>)</muted>"
-    take:
-      usage: "<secondary>Usage:</secondary> <accent>/tea economy take <player> <amount></accent>"
-      success: "<success>Took</success> <highlight><amount></highlight> <success>from</success> <accent><player></accent> <muted>(new balance: <balance>)</muted>"
-    set:
-      usage: "<secondary>Usage:</secondary> <accent>/tea economy set <player> <amount></accent>"
-      success: "<success>Set</success> <accent><player></accent><success>'s balance to</success> <highlight><amount></highlight>"
+lobby:
+  play:
+    usage: "<secondary>Usage:</secondary> <accent>/play <game> [map]</accent>"
+    unknown-game: "<error>Unknown game </error><accent><game></accent><error>. Try </error><accent>/tea game list</accent><error>.</error>"
+    joined: "<success>Joined</success> <primary><game></primary> <muted>on arena</muted> <accent><arena></accent> <muted>(map=</muted><highlight><map></highlight><muted>)</muted>"
+    join-failed: "<error>Could not join <game>. Arena may be full or already starting.</error>"
+    allocation-failed: "<error>Allocation failed: <reason></error>"
+    queued: "<success>Queued for</success> <primary><game></primary> <muted>(map:</muted> <accent><map></accent><muted>). Searching for an arena...</muted>"
+  sign:
+    line1: "<yellow><bold><game></bold></yellow>"
+    line2: "<gray><map></gray>"
+    line3: "<aqua>>> Click to Join <<</aqua>"
+    line4: "<green><players> players</green>"
+  admin:
+    usage: "<secondary>Usage:</secondary> <accent>/tea lobby <sign|spawn|config|reload></accent>"
+    reload:
+      done: "<success>Reloaded lobby config and <count> connection sign(s).</success>"
+    sign:
+      usage: "<secondary>Usage:</secondary> <accent>/tea lobby sign <bind|unbind|list></accent>"
+      not-looking-at-sign: "<error>Look at a placed sign (within 6 blocks) and try again.</error>"
+      bind:
+        usage: "<secondary>Usage:</secondary> <accent>/tea lobby sign bind <game> [map]</accent>"
+        done: "<success>Bound sign at</success> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight> <muted>to</muted> <primary><game></primary> <muted>(map=</muted><accent><map></accent><muted>)</muted>"
+      unbind:
+        done: "<success>Unbound sign.</success>"
+        not-bound: "<warning>That sign is not bound.</warning>"
+        auto: "<success>Sign was bound - unbound automatically.</success>"
+      list:
+        header: "<primary><bold>Connection signs</bold></primary>"
+        empty: "<muted>(no signs bound)</muted>"
+        entry: "<accent><world></accent> <muted>@</muted> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight> <muted>-></muted> <primary><game></primary><muted>/</muted><accent><map></accent>"
+    spawn:
+      usage: "<secondary>Usage:</secondary> <accent>/tea lobby spawn <set|tp></accent>"
+      not-set: "<warning>No lobby spawn is configured. Stand where you want it and run </warning><accent>/tea lobby spawn set</accent><warning>.</warning>"
+      set:
+        done: "<success>Lobby spawn set to</success> <accent><world></accent> <muted>@</muted> <highlight><x></highlight><muted>,</muted><highlight><y></highlight><muted>,</muted><highlight><z></highlight>"
+      tp:
+        done: "<success>Teleported to lobby spawn.</success>"
+    config:
+      usage: "<secondary>Usage:</secondary> <accent>/tea lobby config <show|manage-spawn|gamemode></accent>"
+      show: "<primary><bold>Lobby config</bold></primary> <muted>|</muted> <secondary>manage-spawn:</secondary> <accent><manage-spawn></accent> <muted>|</muted> <secondary>gamemode:</secondary> <accent><gamemode></accent> <muted>|</muted> <secondary>spawn:</secondary> <highlight><spawn></highlight>"
+      manage-spawn:
+        usage: "<secondary>Usage:</secondary> <accent>/tea lobby config manage-spawn <true|false></accent>"
+        done: "<success>manage-spawn is now</success> <accent><value></accent>"
+      gamemode:
+        usage: "<secondary>Usage:</secondary> <accent>/tea lobby config gamemode <survival|creative|adventure|spectator></accent>"
+        invalid: "<error>Invalid gamemode </error><accent><value></accent><error>. Use one of: survival, creative, adventure, spectator.</error>"
+        done: "<success>Lobby gamemode is now</success> <accent><mode></accent>"
