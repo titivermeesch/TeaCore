@@ -95,9 +95,8 @@ public final class KitSelectorGui {
         }
         meta.setDisplayName(name);
 
-        String desc = messageService.renderLegacyNoPrefix(locale, kit.descriptionKey(), Map.of());
-        List<String> lore = new ArrayList<>();
-        lore.add(desc);
+        List<String> lore = new ArrayList<>(
+                messageService.renderLegacyLines(locale, kit.descriptionKey(), Map.of()));
         if (hasCost) {
             String costLine;
             if (unlocked) {

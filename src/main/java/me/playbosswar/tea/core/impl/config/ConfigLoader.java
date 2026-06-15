@@ -51,6 +51,8 @@ public final class ConfigLoader {
             "arena-pool",
             "arena-pool.mode",
             "arena-pool.games",
+            "map-setup-scoreboard",
+            "map-setup-scoreboard.enabled",
             "lobby",
             "lobby.enabled",
             "lobby.manage-spawn",

@@ -36,6 +36,7 @@ public final class MapDraft {
     private final Map<String, Object> extensions = new LinkedHashMap<>();
     private int minPlayers = 2;
     private int maxPlayers = 16;
+    private String displayName; // null = use mapId at render time
 
     public MapDraft(UUID ownerUuid, GameId gameId, String mapId,
             String editWorldName, Location preEditLocation) {
@@ -116,6 +117,14 @@ public final class MapDraft {
 
     public void setMaxPlayers(int v) {
         this.maxPlayers = Math.max(minPlayers, v);
+    }
+
+    public Optional<String> displayName() {
+        return Optional.ofNullable(displayName);
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = (displayName == null || displayName.isBlank()) ? null : displayName;
     }
 
     /**

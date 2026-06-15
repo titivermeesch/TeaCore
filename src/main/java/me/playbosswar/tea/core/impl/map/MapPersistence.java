@@ -140,8 +140,9 @@ public final class MapPersistence {
 
             int minPlayers = mapSection.getInt("min-players", 2);
             int maxPlayers = mapSection.getInt("max-players", 16);
+            String displayName = mapSection.getString("display-name");
 
-            out.add(new MapDefinition(gameId, mapId, schematicPath, waiting, participants,
+            out.add(new MapDefinition(gameId, mapId, displayName, schematicPath, waiting, participants,
                     extensions, minPlayers, maxPlayers));
         }
         return out;
@@ -163,6 +164,8 @@ public final class MapPersistence {
         ConfigurationSection section = maps.createSection(def.mapId());
         section.set("min-players", def.minPlayers());
         section.set("max-players", def.maxPlayers());
+        if (def.displayName() != null)
+            section.set("display-name", def.displayName());
         def.schematic().ifPresent(p -> section.set("schematic-file",
                 schematicsDir.relativize(p).toString().replace('\\', '/')));
         if (def.waitingSpawn() != null) {

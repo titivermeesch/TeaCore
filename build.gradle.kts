@@ -20,6 +20,7 @@ repositories {
     maven("https://oss.sonatype.org/content/repositories/snapshots/")
     maven("https://maven.enginehub.org/repo/")
     maven("https://repo.faststats.dev/releases")
+    maven("https://repo.extendedclip.com/releases/")
     // VaultAPI is published via JitPack (hard runtime dep; shipped by the
     // server admin, not shaded into our jar).
     maven("https://jitpack.io")
@@ -52,6 +53,7 @@ dependencies {
     compileOnly(libs.worldedit.bukkit) { isTransitive = false }
     compileOnly(libs.worldedit.core) { isTransitive = false }
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1") { isTransitive = false }
+    compileOnly("me.clip:placeholderapi:2.11.6")
 
     implementation(libs.adventure.api)
     implementation(libs.adventure.minimessage)

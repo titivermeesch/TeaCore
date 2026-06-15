@@ -49,8 +49,18 @@ public final class WorldEditPaster {
         }
     }
 
-    public static BlockVector3 saveRegion(World world, BlockVector3 cornerA, BlockVector3 cornerB,
+    /**
+     * Captures a region to a schematic. Corners and the returned min-corner are
+     * plain {@code int} triples so callers never reference a WorldEdit type - the
+     * WE classes stay confined to this class, which is only loaded when WE/FAWE
+     * is present.
+     *
+     * @return the region's min-corner as {@code [x, y, z]}.
+     */
+    public static int[] saveRegion(World world, int ax, int ay, int az, int bx, int by, int bz,
             Path outputFile) throws IOException, WorldEditException {
+        BlockVector3 cornerA = BlockVector3.at(ax, ay, az);
+        BlockVector3 cornerB = BlockVector3.at(bx, by, bz);
         BlockVector3 min = BlockVector3.at(
                 Math.min(cornerA.x(), cornerB.x()),
                 Math.min(cornerA.y(), cornerB.y()),
@@ -76,12 +86,16 @@ public final class WorldEditPaster {
                 ClipboardWriter writer = BuiltInClipboardFormat.SPONGE_V3_SCHEMATIC.getWriter(os)) {
             writer.write(clipboard);
         }
-        return min;
+        return new int[]{min.x(), min.y(), min.z()};
     }
 
-    public static BlockVector3 readDimensions(Path schematicFile) throws IOException {
-        Clipboard c = readClipboard(schematicFile);
-        return c.getDimensions();
+    /**
+     * Returns a schematic's dimensions as {@code [width, height, length]} so
+     * callers stay free of WorldEdit types.
+     */
+    public static int[] readDimensions(Path schematicFile) throws IOException {
+        BlockVector3 dims = readClipboard(schematicFile).getDimensions();
+        return new int[]{dims.x(), dims.y(), dims.z()};
     }
 
     private static Clipboard readClipboard(Path schematicFile) throws IOException {

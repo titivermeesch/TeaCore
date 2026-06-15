@@ -6,7 +6,7 @@ author: playbosswar
 description: Shared engine for Tea minigames.
 load: STARTUP
 depend: [Vault]
-softdepend: [WorldEdit, FastAsyncWorldEdit]
+softdepend: [WorldEdit, FastAsyncWorldEdit, PlaceholderAPI]
 
 commands:
   tea:

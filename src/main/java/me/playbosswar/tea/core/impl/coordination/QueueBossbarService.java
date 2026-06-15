@@ -1,16 +1,13 @@
 package me.playbosswar.tea.core.impl.coordination;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.playbosswar.tea.core.api.coordination.CoordinationBackend;
 import me.playbosswar.tea.core.api.coordination.QueueEntry;
-import me.playbosswar.tea.core.api.game.GameDefinition;
-import me.playbosswar.tea.core.api.game.GameRegistry;
+import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.message.MessageService;
 import org.bukkit.Bukkit;
 import org.bukkit.boss.BarColor;
@@ -25,23 +22,23 @@ import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Shows a persistent bossbar to each player currently in a queue, with their
- * position and the queue length. Refreshes every second by scanning
- * {@link CoordinationBackend#queueFor}.
+ * position and the queue length. Refreshes every second by walking the
+ * online-player list and asking the {@link CoordinationBackend} whether each
+ * player is queued anywhere - so this works on the lobby server even though
+ * no game plugin is registered locally.
  */
 public final class QueueBossbarService implements Listener {
 
     private final Plugin plugin;
     private final CoordinationBackend backend;
-    private final GameRegistry gameRegistry;
     private final MessageService messageService;
     private final ConcurrentHashMap<UUID, BossBar> bossbars = new ConcurrentHashMap<>();
     private BukkitTask task;
 
     public QueueBossbarService(Plugin plugin, CoordinationBackend backend,
-            GameRegistry gameRegistry, MessageService messageService) {
+            MessageService messageService) {
         this.plugin = plugin;
         this.backend = backend;
-        this.gameRegistry = gameRegistry;
         this.messageService = messageService;
     }
 
@@ -63,18 +60,17 @@ public final class QueueBossbarService implements Listener {
 
     private void tick() {
         Set<UUID> stillQueued = new HashSet<>();
-        for (GameDefinition def : gameRegistry.all()) {
-            List<QueueEntry> entries = new ArrayList<>(backend.queueFor(def.id()));
-            int total = entries.size();
-            int pos = 0;
-            for (QueueEntry entry : entries) {
-                Player p = Bukkit.getPlayer(entry.playerUuid());
-                if (p != null) {
-                    updateBossbar(p, def.id().value(), pos + 1, total);
-                    stillQueued.add(p.getUniqueId());
-                }
-                pos++;
-            }
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            QueueEntry entry = backend.queueEntryOf(p.getUniqueId()).orElse(null);
+            if (entry == null)
+                continue;
+            GameId gameId = entry.gameId();
+            int total = backend.queueFor(gameId).size();
+            int position = backend.queuePosition(p.getUniqueId(), gameId);
+            if (position < 0)
+                continue; // entry vanished between the two lookups
+            updateBossbar(p, gameId.value(), position + 1, total);
+            stillQueued.add(p.getUniqueId());
         }
         // Remove bossbars for players no longer in any queue
         bossbars.entrySet().removeIf(e -> {

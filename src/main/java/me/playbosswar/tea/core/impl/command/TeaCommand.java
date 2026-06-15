@@ -378,13 +378,24 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         MessageService ms = plugin.messageService();
         if (args.length < 2 || "list".equalsIgnoreCase(args[1])) {
             ms.sendToSender(sender, "core.game.list.header");
+            // Walk every game id the fleet has published as hosted, not just
+            // ones registered on this server's local GameRegistry. The lobby
+            // doesn't load the game plugins itself, but we still want
+            // /tea game list to surface the games admins can /play to.
+            java.util.LinkedHashSet<me.playbosswar.tea.core.api.game.GameId> ids =
+                    new java.util.LinkedHashSet<>();
+            for (GameDefinition def : plugin.games().all())
+                ids.add(def.id());
+            ids.addAll(plugin.coordination().allHostedGames());
             int shown = 0;
-            for (GameDefinition def : plugin.games().all()) {
-                int maps = plugin.maps().forGame(def.id()).size();
+            for (var id : ids) {
+                GameDefinition def = plugin.games().get(id).orElse(null);
+                int maps = plugin.maps().forGame(id).size();
+                String teams = def == null ? "remote" : def.teamMode().name();
                 ms.sendToSender(sender, "core.game.list.entry", Map.of(
-                        "id", def.id().value(),
+                        "id", id.value(),
                         "maps", String.valueOf(maps),
-                        "teams", def.teamMode().name()));
+                        "teams", teams));
                 shown++;
             }
             if (shown == 0) {

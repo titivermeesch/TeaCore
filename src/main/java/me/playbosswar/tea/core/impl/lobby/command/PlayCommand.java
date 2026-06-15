@@ -82,6 +82,13 @@ public final class PlayCommand implements TabExecutor {
     }
 
     private void handleQueued(Player player, GameId gameId, String mapFilter) {
+        // Validate against the fleet-wide hosted-games view rather than the
+        // local registry; the lobby never has the game plugin loaded.
+        if (!core.coordination().allHostedGames().contains(gameId)) {
+            core.messageService().send(player, "lobby.play.unknown-game",
+                    Map.of("game", gameId.value()));
+            return;
+        }
         List<String> mapIds = mapFilter == null ? List.of() : List.of(mapFilter);
         QueueEntry entry = new QueueEntry(
                 player.getUniqueId(), player.getName(), gameId, mapIds, Instant.now());
@@ -95,8 +102,10 @@ public final class PlayCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            return core.games().all().stream()
-                    .map(d -> d.id().value())
+            // Use the fleet-wide hosted-games view so completion still works on
+            // a lobby server that doesn't load any game plugins itself.
+            return core.coordination().allHostedGames().stream()
+                    .map(GameId::value)
                     .filter(s -> s.startsWith(prefix))
                     .toList();
         }

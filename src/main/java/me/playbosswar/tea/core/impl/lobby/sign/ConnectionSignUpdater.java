@@ -76,9 +76,20 @@ public final class ConnectionSignUpdater {
                 availableArenas++;
         }
 
+        // Use the authored display name when the sign targets a specific map
+        // and a MapDefinition is loaded locally; otherwise fall back to the raw
+        // filter string (or "any" for any-map signs).
+        String mapDisplay;
+        if (sign.acceptsAnyMap()) {
+            mapDisplay = "any";
+        } else {
+            mapDisplay = core.maps().get(sign.gameId(), sign.mapFilter())
+                    .map(m -> m.resolvedDisplayName())
+                    .orElse(sign.mapFilter());
+        }
         Map<String, String> placeholders = Map.of(
                 "game", sign.gameId().value(),
-                "map", sign.acceptsAnyMap() ? "any" : sign.mapFilter(),
+                "map", mapDisplay,
                 "players", String.valueOf(totalPlayers),
                 "arenas", String.valueOf(availableArenas));
         String line1 = ms.renderLegacy(defaultLocale, "lobby.sign.line1", placeholders);

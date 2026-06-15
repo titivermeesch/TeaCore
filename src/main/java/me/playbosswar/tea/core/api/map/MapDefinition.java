@@ -22,6 +22,8 @@ import org.jetbrains.annotations.Nullable;
  *
  * @param gameId            game this map belongs to; never {@code null}.
  * @param mapId             id unique within the game; never {@code null}.
+ * @param displayName       human-readable name shown in scoreboards / sign UIs;
+ *                          {@code null} or blank falls back to {@link #mapId()}.
  * @param schematicFile     absolute path to a {@code .schem} (WorldEdit) file,
  *                          or {@code null} for a void-only map.
  * @param waitingSpawn      spawn used while players are in the waiting phase;
@@ -41,6 +43,7 @@ import org.jetbrains.annotations.Nullable;
 public record MapDefinition(
         GameId gameId,
         String mapId,
+        @Nullable String displayName,
         @Nullable Path schematicFile,
         SpawnPoint waitingSpawn,
         List<SpawnPoint> participantSpawns,
@@ -55,10 +58,24 @@ public record MapDefinition(
     public MapDefinition {
         participantSpawns = List.copyOf(participantSpawns);
         extensions = extensions == null ? Map.of() : Map.copyOf(extensions);
+        if (displayName != null && displayName.isBlank())
+            displayName = null;
         if (minPlayers < 1)
             minPlayers = 1;
         if (maxPlayers < minPlayers)
             maxPlayers = minPlayers;
+    }
+
+    /**
+     * Back-compat constructor for callers that don't supply an explicit
+     * display name. The resolved {@link #displayName()} falls back to the
+     * map id at render time.
+     */
+    public MapDefinition(GameId gameId, String mapId, @Nullable Path schematicFile,
+            SpawnPoint waitingSpawn, List<SpawnPoint> participantSpawns,
+            Map<String, Object> extensions, int minPlayers, int maxPlayers) {
+        this(gameId, mapId, null, schematicFile, waitingSpawn, participantSpawns,
+                extensions, minPlayers, maxPlayers);
     }
 
     /**
@@ -76,8 +93,18 @@ public record MapDefinition(
     public MapDefinition(GameId gameId, String mapId, @Nullable Path schematicFile,
             SpawnPoint waitingSpawn, List<SpawnPoint> participantSpawns,
             int minPlayers, int maxPlayers) {
-        this(gameId, mapId, schematicFile, waitingSpawn, participantSpawns,
+        this(gameId, mapId, null, schematicFile, waitingSpawn, participantSpawns,
                 Map.of(), minPlayers, maxPlayers);
+    }
+
+    /**
+     * Returns the human-readable display name, defaulting to {@link #mapId()}
+     * when no override has been authored.
+     *
+     * @return the display name to show users, never {@code null}.
+     */
+    public String resolvedDisplayName() {
+        return displayName == null ? mapId : displayName;
     }
 
     /**

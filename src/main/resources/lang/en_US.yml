@@ -4,6 +4,9 @@ core:
     failed: "<error>Reload failed: <reason></error>"
   version:
     line: "<primary>TeaCore</primary> <muted>v</muted><highlight><version></highlight>"
+  achievement:
+    title: "<accent><bold>Achievement Unlocked!</bold></accent>"
+    chat: "<accent>Achievement unlocked: <highlight><name></highlight></accent>"
   command:
     no-permission: "<error>You don't have permission to use that.</error>"
     unknown: "<error>Unknown subcommand. Try </error><accent>/tea help</accent><error>.</error>"
@@ -71,7 +74,32 @@ core:
   queue:
     bossbar: "<accent>Queued:</accent> <primary><game></primary> <muted>-</muted> #<position><muted>/</muted><total>"
   map:
-    usage: "<secondary>Usage:</secondary> <accent>/tea map <create|edit|pos1|pos2|waiting|addspawn|clearspawns|save|discard|list|info|reload|delete></accent> <muted>(plus any game-registered subcommand)</muted>"
+    usage: "<secondary>Run </secondary><accent>/tea map help</accent><secondary> for the full subcommand list.</secondary>"
+    help:
+      header: "<primary><bold>Map subcommands</bold></primary>"
+      create: "<accent>/tea map create <game> <map></accent> <muted>-</muted> <secondary>Open a fresh edit world for a new map</secondary>"
+      edit: "<accent>/tea map edit <game> <map></accent> <muted>-</muted> <secondary>Re-open an existing map in an edit world</secondary>"
+      pos1: "<accent>/tea map pos1</accent> <muted>-</muted> <secondary>Mark the first build-region corner at your feet</secondary>"
+      pos2: "<accent>/tea map pos2</accent> <muted>-</muted> <secondary>Mark the opposite build-region corner</secondary>"
+      waiting: "<accent>/tea map waiting</accent> <muted>-</muted> <secondary>Set the pre-match waiting spawn at your location</secondary>"
+      addspawn: "<accent>/tea map addspawn</accent> <muted>-</muted> <secondary>Add a participant spawn at your location</secondary>"
+      clearspawns: "<accent>/tea map clearspawns</accent> <muted>-</muted> <secondary>Remove every participant spawn from the draft</secondary>"
+      displayname: "<accent>/tea map displayname [name...]</accent> <muted>-</muted> <secondary>Set (or, with no args, clear) the human-readable map name</secondary>"
+      min: "<accent>/tea map min <number></accent> <muted>-</muted> <secondary>Set the minimum participant count to start a match</secondary>"
+      max: "<accent>/tea map max <number></accent> <muted>-</muted> <secondary>Set the participant cap</secondary>"
+      removeextension: "<accent>/tea map removeextension <id></accent> <muted>-</muted> <secondary>Drop a game-contributed extension value from the draft</secondary>"
+      status: "<accent>/tea map status</accent> <muted>-</muted> <secondary>Show what's set on the draft and what's still required</secondary>"
+      board: "<accent>/tea map board</accent> <muted>-</muted> <secondary>Toggle the map-setup sidebar on or off</secondary>"
+      save: "<accent>/tea map save</accent> <muted>-</muted> <secondary>Save the draft and tear down the edit world</secondary>"
+      discard: "<accent>/tea map discard</accent> <muted>-</muted> <secondary>Drop the draft without saving</secondary>"
+      list: "<accent>/tea map list [game]</accent> <muted>-</muted> <secondary>List registered maps</secondary>"
+      info: "<accent>/tea map info <game> <map></accent> <muted>-</muted> <secondary>Show details for a saved map</secondary>"
+      reload: "<accent>/tea map reload</accent> <muted>-</muted> <secondary>Re-read every map yaml from disk</secondary>"
+      delete: "<accent>/tea map delete <game> <map></accent> <muted>-</muted> <secondary>Permanently delete a saved map and its schematic</secondary>"
+      hint-extensions: "<muted>Game plugins may add their own subcommands; run </muted><accent>/tea map status</accent><muted> to see required ones.</muted>"
+    displayname:
+      set: "<success>Display name for</success> <accent><map></accent> <success>set to</success> <highlight><name></highlight>"
+      cleared: "<warning>Display name for</warning> <accent><map></accent> <warning>cleared - falls back to the map id.</warning>"
     no-active-draft: "<error>No active draft. Run </error><accent>/tea map create <game> <map></accent><error> or </error><accent>/tea map edit <game> <map></accent><error>.</error>"
     not-in-edit-world: "<error>Return to your edit world first: </error><accent><world></accent>"
     create:
@@ -101,16 +129,49 @@ core:
       missing: "<warning>No extension set for</warning> <accent><id></accent>"
     status:
       header: "<primary><bold>Draft status</bold></primary> <muted>-</muted> <accent><game>/<map></accent>"
-      entry: "<muted>- </muted><secondary><field>:</secondary> <highlight><value></highlight>"
-      ready: "<success>All required fields are set; you can </success><accent>/tea map save</accent><success>.</success>"
-      missing-header: "<warning>Before saving, set:</warning>"
+      entry-set: "<success>✓</success> <secondary><field>:</secondary> <highlight><value></highlight>"
+      entry-missing: "<error>!</error> <error><field>:</error> <muted>(not set)</muted>"
+      entry-optional: "<muted>- </muted><muted><field>: (optional, not set)</muted>"
+      ready: "<success>✓ All set. You can </success><accent>/tea map save</accent><success>.</success>"
+      missing-header: "<warning><bold>Cannot save yet.</bold></warning> <warning>Fix these:</warning>"
       missing:
-        pos1: "<error>- pos1: stand in one corner of the build area and run </error><accent>/tea map pos1</accent>"
-        pos2: "<error>- pos2: stand in the opposite corner and run </error><accent>/tea map pos2</accent>"
-        participant-spawns: "<error>- at least one participant spawn: stand at each player spawn and run </error><accent>/tea map addspawn</accent>"
-        waiting-spawn: "<error>- waiting spawn: stand where players should wait pre-match and run </error><accent>/tea map waiting</accent>"
-        extension: "<error>- required extension </error><accent><id></accent><error>: run </error><accent>/tea map <subcommand></accent>"
-        no-active-draft: "<error>- no active draft. Start with </error><accent>/tea map create</accent><error> or </error><accent>/tea map edit</accent>"
+        pos1: "<error>!</error> <secondary>pos1 - stand in one corner of the build area and run </secondary><accent>/tea map pos1</accent>"
+        pos2: "<error>!</error> <secondary>pos2 - stand in the opposite corner and run </secondary><accent>/tea map pos2</accent>"
+        participant-spawns: "<error>!</error> <secondary>at least one participant spawn - stand where each player starts and run </secondary><accent>/tea map addspawn</accent>"
+        waiting-spawn: "<error>!</error> <secondary>waiting spawn - stand where players wait pre-match and run </secondary><accent>/tea map waiting</accent>"
+        extension: "<error>!</error> <secondary>required extension </secondary><accent><id></accent><secondary> - run </secondary><accent>/tea map <subcommand></accent>"
+        no-active-draft: "<error>!</error> <secondary>no active draft. Start with </secondary><accent>/tea map create</accent><secondary> or </secondary><accent>/tea map edit</accent>"
+    board:
+      shown: "<success>Map-setup sidebar shown.</success> <muted>Toggle it off with </muted><accent>/tea map board</accent><muted>.</muted>"
+      hidden: "<warning>Map-setup sidebar hidden.</warning> <muted>Toggle it back with </muted><accent>/tea map board</accent><muted>.</muted>"
+      disabled: "<error>The map-setup sidebar is disabled on this server (</error><accent>map-setup-scoreboard.enabled</accent><error>).</error>"
+    scoreboard:
+      # Objective title shown at the top of the sidebar.
+      title: "<primary><bold>Map Setup</bold></primary>"
+      # Context line under the title (which map is being authored).
+      context: "<accent><game></accent><muted>/</muted><accent><map></accent>"
+      # Footer when there are more incomplete steps than fit in the window.
+      more: "<muted>+<count> more step(s) left</muted>"
+      # Shown once every required step is set.
+      ready: "<success>✓ Ready! Run /tea map save</success>"
+      step:
+        pos1:
+          label: "<secondary>» Set build corner 1</secondary>"
+          hint: "<accent>/tea map pos1</accent>"
+        pos2:
+          label: "<secondary>» Set build corner 2</secondary>"
+          hint: "<accent>/tea map pos2</accent>"
+        waiting-spawn:
+          label: "<secondary>» Set waiting spawn</secondary>"
+          hint: "<accent>/tea map waiting</accent>"
+        participant-spawns:
+          label: "<secondary>» Add participant spawns</secondary>"
+          hint: "<accent>/tea map addspawn</accent>"
+        # Required game-contributed extensions; <label> and <subcommand> come
+        # from the registering game's MapExtension.
+        extension:
+          label: "<secondary>» <label></secondary>"
+          hint: "<accent>/tea map <subcommand></accent>"
     min:
       usage: "<secondary>Usage:</secondary> <accent>/tea map min <number></accent>"
       set: "<success>Player bounds:</success> <accent><min></accent><muted>-</muted><accent><max></accent>"
@@ -118,10 +179,10 @@ core:
       usage: "<secondary>Usage:</secondary> <accent>/tea map max <number></accent>"
       set: "<success>Player bounds:</success> <accent><min></accent><muted>-</muted><accent><max></accent>"
     save:
-      success: "<success>Saved map</success> <accent><game>/<map></accent> <muted>(</muted><spawns><muted> spawns)</muted>"
-      failed: "<error>Save failed: <reason></error>"
-      no-spawns: "<error>Add at least one participant spawn with </error><accent>/tea map addspawn</accent><error>.</error>"
-      missing-header: "<warning><bold>Cannot save yet.</bold> The following still need to be set:</warning>"
+      success: "<success>✓ Saved map</success> <accent><game>/<map></accent> <muted>(</muted><spawns><muted> spawns)</muted>"
+      failed: "<error>! Save failed:</error> <muted><reason></muted>"
+      no-spawns: "<error>! Add at least one participant spawn with </error><accent>/tea map addspawn</accent><error>.</error>"
+      missing-header: "<warning><bold>Cannot save yet.</bold></warning> <warning>Fix these:</warning>"
     discard:
       done: "<warning>Discarded draft.</warning>"
       none: "<warning>No active draft to discard.</warning>"
@@ -133,6 +194,7 @@ core:
       usage: "<secondary>Usage:</secondary> <accent>/tea map info <game> <map></accent>"
       not-found: "<error>Map not found: </error><accent><game>/<map></accent>"
       header: "<primary><bold>Map</bold></primary> <accent><game>/<map></accent>"
+      display-name: "<muted>display name:</muted> <highlight><name></highlight>"
       schematic: "<muted>schematic:</muted> <highlight><file></highlight>"
       waiting: "<muted>waiting spawn:</muted> <highlight><waiting></highlight>"
       spawns: "<muted>participant spawns:</muted> <highlight><count></highlight>"

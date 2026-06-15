@@ -1,5 +1,6 @@
 package me.playbosswar.tea.core.api;
 
+import me.playbosswar.tea.core.api.achievement.AchievementService;
 import me.playbosswar.tea.core.api.arena.ArenaManager;
 import me.playbosswar.tea.core.api.chat.ChatRouter;
 import me.playbosswar.tea.core.api.chat.MatchBroadcaster;
@@ -12,11 +13,13 @@ import me.playbosswar.tea.core.api.kit.KitRegistry;
 import me.playbosswar.tea.core.api.map.MapService;
 import me.playbosswar.tea.core.api.message.MessageService;
 import me.playbosswar.tea.core.api.persistence.DatabaseService;
+import me.playbosswar.tea.core.api.placeholder.PlaceholderService;
 import me.playbosswar.tea.core.api.profile.PlayerProfileService;
 import me.playbosswar.tea.core.api.stats.StatsRegistry;
 import me.playbosswar.tea.core.api.team.TeamManager;
 import me.playbosswar.tea.core.api.theme.Theme;
 import me.playbosswar.tea.core.api.transport.ProxyTransport;
+import me.playbosswar.tea.core.api.version.VersionRequirement;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -41,6 +44,46 @@ public interface TeaCoreAPI {
      * @return the version, never {@code null}.
      */
     String version();
+
+    /**
+     * Tests whether the running TeaCore satisfies a version requirement.
+     *
+     * @param requirement a {@link VersionRequirement} spec, e.g. {@code ">=0.2.0"}
+     *                    or {@code "==1.0.0"}; must not be {@code null} or blank.
+     * @return {@code true} if {@link #version()} satisfies the requirement.
+     * @throws IllegalArgumentException if the spec cannot be parsed.
+     */
+    default boolean isCompatible(String requirement) {
+        return VersionRequirement.parse(requirement).isSatisfiedBy(version());
+    }
+
+    /**
+     * Enforces a TeaCore version requirement for a dependent plugin (typically a
+     * game). When the running TeaCore does not satisfy {@code requirement}, this
+     * logs an explanatory error through the plugin's logger and disables the
+     * plugin so it does not start against an incompatible core. Call it at the
+     * top of {@code onEnable} and return early when it returns {@code false}:
+     *
+     * <pre>{@code
+     * if (!core.requireVersion(this, ">=0.2.0")) return;
+     * }</pre>
+     *
+     * @param plugin      the dependent plugin to disable on mismatch; must not be
+     *                    {@code null}.
+     * @param requirement a {@link VersionRequirement} spec; must not be
+     *                    {@code null} or blank.
+     * @return {@code true} if compatible (the caller may continue), {@code false}
+     *         if the plugin was disabled.
+     */
+    default boolean requireVersion(org.bukkit.plugin.Plugin plugin, String requirement) {
+        if (isCompatible(requirement)) {
+            return true;
+        }
+        plugin.getLogger().severe("Requires TeaCore " + requirement + " but found " + version()
+                + " - disabling " + plugin.getName() + ". Update TeaCore or this plugin so their versions match.");
+        plugin.getServer().getPluginManager().disablePlugin(plugin);
+        return false;
+    }
 
     /**
      * Returns the unique identifier for this backend server.
@@ -198,6 +241,23 @@ public interface TeaCoreAPI {
      * @return the economy service, never {@code null}.
      */
     EconomyService economy();
+
+    /**
+     * Returns the placeholder service backing the {@code %tea_...%}
+     * PlaceholderAPI expansion. Games register their own placeholders here.
+     *
+     * @return the placeholder service, never {@code null}.
+     */
+    PlaceholderService placeholders();
+
+    /**
+     * Returns the shared achievement service. Games register their
+     * {@link me.playbosswar.tea.core.api.achievement.AchievementDefinition}s on
+     * enable and award them by id during play.
+     *
+     * @return the achievement service, never {@code null}.
+     */
+    AchievementService achievements();
 
     /**
      * Returns the initialized singleton instance.

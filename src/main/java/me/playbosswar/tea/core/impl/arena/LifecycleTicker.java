@@ -148,7 +148,6 @@ public final class LifecycleTicker {
 
     private void tickStarting(ArenaImpl arena, GameDefinition def) {
         if (arena.phaseSecondsRemaining() <= 0) {
-            // Set the LIVE phase remaining to the match-timer cap, or -1 for no limit.
             int matchSeconds = def.lifecycle().maxMatchSeconds();
             arenaManager.transition(arena, ArenaState.LIVE, matchSeconds > 0 ? matchSeconds : -1);
         } else {

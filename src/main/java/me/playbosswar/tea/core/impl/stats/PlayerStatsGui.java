@@ -87,11 +87,10 @@ public final class PlayerStatsGui {
             Map<String, String> entries = stats.providerFor(schema).fetch(targetUuid);
             if (entries != null && !entries.isEmpty()) gamesWithData++;
         }
-        meta.setLore(List.of(
-                messageService.renderLegacyNoPrefix(locale, "core.stats.gui.summary.lore",
-                        Map.of(
-                                "with", String.valueOf(gamesWithData),
-                                "total", String.valueOf(schemas.size())))));
+        meta.setLore(messageService.renderLegacyLines(locale, "core.stats.gui.summary.lore",
+                Map.of(
+                        "with", String.valueOf(gamesWithData),
+                        "total", String.valueOf(schemas.size()))));
         stack.setItemMeta(meta);
         return stack;
     }
@@ -100,7 +99,13 @@ public final class PlayerStatsGui {
         ItemStack stack = new ItemStack(Material.PAPER);
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) return stack;
-        String displayName = messageService.renderLegacyNoPrefix(locale, schema.displayNameKey(), Map.of());
+        // Lobby servers don't have game-plugin lang bundles loaded, so the
+        // schema's displayNameKey often resolves to a missing-translation
+        // marker. Fall back to a humanized form of the game id when the key
+        // isn't registered anywhere - it's more readable than "<error>...".
+        String displayName = messageService.hasKey(schema.displayNameKey())
+                ? messageService.renderLegacyNoPrefix(locale, schema.displayNameKey(), Map.of())
+                : humanize(schema.gameId().value());
         meta.setDisplayName(messageService.renderLegacyNoPrefix(locale, "core.stats.gui.game.name",
                 Map.of("game", displayName)));
 
@@ -117,6 +122,31 @@ public final class PlayerStatsGui {
         meta.setLore(lore);
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    /**
+     * Turns a snake_case game id into a Title-Cased label, e.g.
+     * {@code "ascend"} -> {@code "Ascend"}, {@code "team_deathmatch"} ->
+     * {@code "Team Deathmatch"}. Used as the lobby fallback for
+     * {@link StatsSchema#displayNameKey()} when no lang bundle defines it.
+     */
+    private static String humanize(String id) {
+        if (id == null || id.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(id.length());
+        boolean nextUpper = true;
+        for (int i = 0; i < id.length(); i++) {
+            char c = id.charAt(i);
+            if (c == '_' || c == '-') {
+                sb.append(' ');
+                nextUpper = true;
+            } else if (nextUpper) {
+                sb.append(Character.toUpperCase(c));
+                nextUpper = false;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private ItemStack buildCloseButton(String locale) {

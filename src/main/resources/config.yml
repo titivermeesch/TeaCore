@@ -66,6 +66,16 @@ dashboard:
   admin-token: ""
 
 # ----------------------------------------------------------------------
+# Map-setup scoreboard. While an admin authors a map (/tea map create|edit),
+# a sidebar lists the remaining setup steps a few at a time with a "+N more"
+# footer, so the whole checklist isn't dumped at once. Toggle it per-player
+# with /tea map board. The step list is shared by every game, so each game
+# gets identical setup guidance. Set to false to disable the sidebar entirely.
+# ----------------------------------------------------------------------
+map-setup-scoreboard:
+  enabled: true
+
+# ----------------------------------------------------------------------
 # Lobby features (formerly the separate TeaLobby plugin).
 # Enable on the server(s) you want to act as the hub: connection signs,
 # /play and the lobby spawn / gamemode auto-management. On arena-only

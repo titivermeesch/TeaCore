@@ -13,6 +13,8 @@ import me.playbosswar.tea.core.api.message.MessageService;
 import me.playbosswar.tea.core.impl.TeaCorePlugin;
 import me.playbosswar.tea.core.impl.map.DraftHandle;
 import me.playbosswar.tea.core.impl.map.MapDraft;
+import me.playbosswar.tea.core.impl.map.MapSetupSidebar;
+import me.playbosswar.tea.core.impl.scoreboard.ScoreboardManager;
 import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -24,8 +26,8 @@ public final class TeaMapCommand {
 
     static final List<String> SUBCOMMANDS = List.of(
             "create", "edit", "pos1", "pos2", "waiting", "addspawn", "clearspawns",
-            "status", "removeextension",
-            "min", "max", "save", "discard", "list", "info", "reload", "delete");
+            "status", "board", "removeextension", "displayname",
+            "min", "max", "save", "discard", "list", "info", "reload", "delete", "help");
 
     private final TeaCorePlugin plugin;
 
@@ -34,12 +36,14 @@ public final class TeaMapCommand {
     }
 
     public void handle(CommandSender sender, String[] args) {
-        MessageService ms = plugin.messageService();
         if (args.length == 0) {
-            ms.sendToSender(sender, "core.map.usage");
+            // The bare `/tea map` invocation shows the structured help block
+            // rather than a single cramped usage line.
+            showHelp(sender);
             return;
         }
         switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "help" -> showHelp(sender);
             case "create" -> create(sender, args);
             case "edit" -> edit(sender, args);
             case "pos1" -> setPos(sender, 1);
@@ -48,7 +52,9 @@ public final class TeaMapCommand {
             case "addspawn" -> addSpawn(sender);
             case "clearspawns" -> clearSpawns(sender);
             case "removeextension" -> removeExtension(sender, args);
+            case "displayname" -> displayName(sender, args);
             case "status" -> status(sender);
+            case "board" -> board(sender);
             case "min" -> setBound(sender, args, true);
             case "max" -> setBound(sender, args, false);
             case "save" -> save(sender);
@@ -59,6 +65,31 @@ public final class TeaMapCommand {
             case "delete" -> delete(sender, args);
             default -> runExtensionSubcommand(sender, args);
         }
+    }
+
+    private void showHelp(CommandSender sender) {
+        MessageService ms = plugin.messageService();
+        ms.sendToSender(sender, "core.map.help.header");
+        ms.sendToSender(sender, "core.map.help.create");
+        ms.sendToSender(sender, "core.map.help.edit");
+        ms.sendToSender(sender, "core.map.help.pos1");
+        ms.sendToSender(sender, "core.map.help.pos2");
+        ms.sendToSender(sender, "core.map.help.waiting");
+        ms.sendToSender(sender, "core.map.help.addspawn");
+        ms.sendToSender(sender, "core.map.help.clearspawns");
+        ms.sendToSender(sender, "core.map.help.displayname");
+        ms.sendToSender(sender, "core.map.help.min");
+        ms.sendToSender(sender, "core.map.help.max");
+        ms.sendToSender(sender, "core.map.help.removeextension");
+        ms.sendToSender(sender, "core.map.help.status");
+        ms.sendToSender(sender, "core.map.help.board");
+        ms.sendToSender(sender, "core.map.help.save");
+        ms.sendToSender(sender, "core.map.help.discard");
+        ms.sendToSender(sender, "core.map.help.list");
+        ms.sendToSender(sender, "core.map.help.info");
+        ms.sendToSender(sender, "core.map.help.reload");
+        ms.sendToSender(sender, "core.map.help.delete");
+        ms.sendToSender(sender, "core.map.help.hint-extensions");
     }
 
     public List<String> complete(CommandSender sender, String[] args) {
@@ -241,6 +272,33 @@ public final class TeaMapCommand {
         ((MapExtension) ext).handleCommand(player, handle, args);
     }
 
+    private void displayName(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player))
+            return;
+        MapDraft draft = requireDraft(player);
+        if (draft == null)
+            return;
+        if (args.length < 2) {
+            // No name = clear, falling back to map id at render time.
+            draft.setDisplayName(null);
+            plugin.messageService().send(player, "core.map.displayname.cleared",
+                    Map.of("map", draft.mapId()));
+            return;
+        }
+        // Re-join all trailing args so the admin can include spaces without
+        // having to wrap the value in quotes.
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < args.length; i++) {
+            if (i > 1)
+                sb.append(' ');
+            sb.append(args[i]);
+        }
+        String name = sb.toString();
+        draft.setDisplayName(name);
+        plugin.messageService().send(player, "core.map.displayname.set",
+                Map.of("map", draft.mapId(), "name", name));
+    }
+
     private void removeExtension(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player))
             return;
@@ -274,37 +332,80 @@ public final class TeaMapCommand {
         MessageService ms = plugin.messageService();
         ms.send(player, "core.map.status.header",
                 Map.of("game", draft.gameId().value(), "map", draft.mapId()));
-        ms.send(player, "core.map.status.entry", Map.of(
-                "field", "pos1",
-                "value", draft.pos1().map(l -> format(l.getX()) + "/" + format(l.getY()) + "/" + format(l.getZ()))
-                        .orElse("-")));
-        ms.send(player, "core.map.status.entry", Map.of(
-                "field", "pos2",
-                "value", draft.pos2().map(l -> format(l.getX()) + "/" + format(l.getY()) + "/" + format(l.getZ()))
-                        .orElse("-")));
-        ms.send(player, "core.map.status.entry", Map.of(
-                "field", "waiting-spawn",
-                "value", draft.waitingSpawn().map(s -> format(s.x()) + "/" + format(s.y()) + "/" + format(s.z()))
-                        .orElse("-")));
-        ms.send(player, "core.map.status.entry", Map.of(
-                "field", "participant-spawns",
-                "value", String.valueOf(draft.participantSpawns().size())));
+        // Pull the missing-fields set so each row can render with a green check
+        // for satisfied fields or a red mark for ones still to author.
+        java.util.Set<String> missingSet = new java.util.HashSet<>(plugin.mapEditingService().validateDraft(player));
+        sendStatusEntry(player, "pos1", !missingSet.contains("pos1"),
+                draft.pos1().map(l -> format(l.getX()) + "/" + format(l.getY()) + "/" + format(l.getZ()))
+                        .orElse(null));
+        sendStatusEntry(player, "pos2", !missingSet.contains("pos2"),
+                draft.pos2().map(l -> format(l.getX()) + "/" + format(l.getY()) + "/" + format(l.getZ()))
+                        .orElse(null));
+        sendStatusEntry(player, "waiting-spawn", !missingSet.contains("waiting-spawn"),
+                draft.waitingSpawn().map(s -> format(s.x()) + "/" + format(s.y()) + "/" + format(s.z()))
+                        .orElse(null));
+        sendStatusEntry(player, "participant-spawns", !missingSet.contains("participant-spawns"),
+                draft.participantSpawns().isEmpty() ? null : String.valueOf(draft.participantSpawns().size()));
+        // display-name is always optional, so render the row green when set and
+        // muted (not "missing") when not - never as a save-blocker.
+        sendStatusEntry(player, "display-name", true, draft.displayName().orElse(null));
         for (MapExtension<?> ext : plugin.maps().extensions().all()) {
             Object value = draft.extensions().get(ext.key().id());
-            ms.send(player, "core.map.status.entry", Map.of(
-                    "field", ext.statusLabel(),
-                    "value", value == null ? "-" : describeValue(ext, value)));
+            boolean satisfied = !missingSet.contains("extension:" + ext.key().id());
+            sendStatusEntry(player, ext.statusLabel(), satisfied,
+                    value == null ? null : describeValue(ext, value));
         }
 
-        List<String> missing = plugin.mapEditingService().validateDraft(player);
-        if (missing.isEmpty()) {
+        if (missingSet.isEmpty()) {
             ms.send(player, "core.map.status.ready");
         } else {
             ms.send(player, "core.map.status.missing-header");
-            for (String field : missing) {
+            for (String field : missingSet) {
                 sendMissingLine(player, field);
             }
         }
+    }
+
+    /**
+     * Renders a single status row. Satisfied rows use the green-check entry
+     * key; missing required rows use the red-mark variant; an unset optional
+     * row falls back to the muted variant so it doesn't read as a save blocker.
+     */
+    private void sendStatusEntry(Player player, String field, boolean satisfied, String value) {
+        MessageService ms = plugin.messageService();
+        if (value != null) {
+            ms.send(player, "core.map.status.entry-set",
+                    Map.of("field", field, "value", value));
+        } else if (satisfied) {
+            ms.send(player, "core.map.status.entry-optional",
+                    Map.of("field", field));
+        } else {
+            ms.send(player, "core.map.status.entry-missing",
+                    Map.of("field", field));
+        }
+    }
+
+    /**
+     * Toggles the map-setup sidebar for the player's current authoring session.
+     * Defaults on when a draft starts; this lets an admin hide it.
+     */
+    private void board(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            plugin.messageService().sendToSender(sender, "core.command.player-only");
+            return;
+        }
+        MapSetupSidebar sidebar = plugin.mapSetupSidebar();
+        ScoreboardManager scoreboards = plugin.scoreboards();
+        if (sidebar == null || scoreboards == null) {
+            plugin.messageService().send(player, "core.map.board.disabled");
+            return;
+        }
+        if (requireDraft(player) == null)
+            return;
+        boolean shown = sidebar.toggle(player);
+        scoreboards.refresh(player);
+        plugin.messageService().send(player,
+                shown ? "core.map.board.shown" : "core.map.board.hidden");
     }
 
     private void sendMissingLine(Player player, String field) {
@@ -449,6 +550,8 @@ public final class TeaMapCommand {
         MessageService ms = plugin.messageService();
         ms.sendToSender(sender, "core.map.info.header",
                 Map.of("game", g.value(), "map", m.mapId()));
+        ms.sendToSender(sender, "core.map.info.display-name",
+                Map.of("name", m.resolvedDisplayName()));
         ms.sendToSender(sender, "core.map.info.schematic",
                 Map.of("file", m.schematic().map(Object::toString).orElse("-")));
         ms.sendToSender(sender, "core.map.info.waiting",

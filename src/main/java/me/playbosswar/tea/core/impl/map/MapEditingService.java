@@ -1,6 +1,5 @@
 package me.playbosswar.tea.core.impl.map;
 
-import com.sk89q.worldedit.math.BlockVector3;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -104,16 +103,17 @@ public final class MapEditingService {
             try {
                 WorldEditPaster.paste(def.schematicFile(), world, MapOrigin.X, MapOrigin.Y, MapOrigin.Z);
 
-                BlockVector3 dims = WorldEditPaster.readDimensions(def.schematicFile());
+                int[] dims = WorldEditPaster.readDimensions(def.schematicFile());
                 MapDraft draft = new MapDraft(player.getUniqueId(), gameId, mapId, worldName, pre);
                 Location origin = MapOrigin.in(world);
                 draft.setPos1(origin.clone());
                 draft.setPos2(new Location(world,
-                        origin.getX() + dims.x() - 1,
-                        origin.getY() + dims.y() - 1,
-                        origin.getZ() + dims.z() - 1));
+                        origin.getX() + dims[0] - 1,
+                        origin.getY() + dims[1] - 1,
+                        origin.getZ() + dims[2] - 1));
                 draft.setMinPlayers(def.minPlayers());
                 draft.setMaxPlayers(def.maxPlayers());
+                draft.setDisplayName(def.displayName());
                 if (def.waitingSpawn() != null) {
                     draft.setWaitingSpawn(absolutize(def.waitingSpawn(), origin));
                 }
@@ -135,7 +135,9 @@ public final class MapEditingService {
                 player.teleport(origin);
                 player.setGameMode(org.bukkit.GameMode.CREATIVE);
                 return draft;
-            } catch (com.sk89q.worldedit.WorldEditException e) {
+            } catch (Exception e) {
+                // Catch broadly (not WorldEditException) so this class carries no
+                // WorldEdit type references and can load on servers without FAWE.
                 destroyEditWorld(worldName);
                 throw new IOException("Schematic paste failed: " + e.getMessage(), e);
             }
@@ -175,6 +177,49 @@ public final class MapEditingService {
         return issues;
     }
 
+    /**
+     * One remaining authoring step for the map-setup sidebar. Carries the
+     * message-bundle keys (resolved per-viewer locale by the scoreboard) plus
+     * the placeholders they need, rather than pre-rendered text.
+     *
+     * @param labelKey     bundle key for the human-readable step label.
+     * @param hintKey      bundle key for the command hint that completes it.
+     * @param placeholders placeholders for both lines (e.g. extension id /
+     *                     subcommand); never {@code null}.
+     */
+    public record SetupStep(String labelKey, String hintKey, Map<String, String> placeholders) {
+    }
+
+    /**
+     * Returns the ordered list of setup steps the player still has to complete
+     * before the draft is save-able, derived from {@link #validateDraft(Player)}.
+     * Empty when the draft is ready (or there is no active draft). Used by the
+     * map-setup sidebar; chat output uses {@code validateDraft} directly.
+     */
+    public List<SetupStep> remainingSteps(Player player) {
+        List<SetupStep> steps = new ArrayList<>();
+        for (String field : validateDraft(player)) {
+            if (field.equals("no-active-draft"))
+                continue;
+            if (field.startsWith("extension:")) {
+                String id = field.substring("extension:".length());
+                MapExtension<?> ext = extensionRegistry.byId(id).orElse(null);
+                String subcommand = ext != null ? ext.subcommand() : id;
+                String label = ext != null ? ext.statusLabel() : id;
+                steps.add(new SetupStep(
+                        "core.map.scoreboard.step.extension.label",
+                        "core.map.scoreboard.step.extension.hint",
+                        Map.of("id", id, "label", label, "subcommand", subcommand)));
+            } else {
+                steps.add(new SetupStep(
+                        "core.map.scoreboard.step." + field + ".label",
+                        "core.map.scoreboard.step." + field + ".hint",
+                        Map.of()));
+            }
+        }
+        return steps;
+    }
+
     /** Captures the region, persists the map, and tears down the edit world. */
     public MapDefinition save(Player player) throws IOException {
         MapDraft draft = drafts.get(player.getUniqueId());
@@ -193,25 +238,28 @@ public final class MapEditingService {
         persistence.ensureDirectories();
         Path schematicFile = persistence.schematicsDir().resolve(draft.mapId() + ".schem");
 
-        BlockVector3 a = toBlockVector(draft.pos1().get());
-        BlockVector3 b = toBlockVector(draft.pos2().get());
+        Location p1 = draft.pos1().get();
+        Location p2 = draft.pos2().get();
 
-        BlockVector3 min;
+        int[] min;
         try {
-            min = WorldEditPaster.saveRegion(editWorld, a, b, schematicFile);
-        } catch (com.sk89q.worldedit.WorldEditException e) {
+            min = WorldEditPaster.saveRegion(editWorld,
+                    p1.getBlockX(), p1.getBlockY(), p1.getBlockZ(),
+                    p2.getBlockX(), p2.getBlockY(), p2.getBlockZ(), schematicFile);
+        } catch (Exception e) {
+            // Broad catch keeps WorldEditException out of this class's bytecode.
             throw new IOException("Schematic capture failed: " + e.getMessage(), e);
         }
+        int minX = min[0];
+        int minY = min[1];
+        int minZ = min[2];
 
         SpawnPoint waitingDelta = draft.waitingSpawn()
-                .map(s -> relativize(s, min))
+                .map(s -> relativize(s, minX, minY, minZ))
                 .orElse(null);
         List<SpawnPoint> participantDeltas = draft.participantSpawns().stream()
-                .map(s -> relativize(s, min))
+                .map(s -> relativize(s, minX, minY, minZ))
                 .toList();
-        int minX = min.x();
-        int minY = min.y();
-        int minZ = min.z();
         Map<String, Object> extensionDeltas = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : draft.extensions().entrySet()) {
             MapExtension<?> ext = extensionRegistry.byId(entry.getKey()).orElse(null);
@@ -222,7 +270,8 @@ public final class MapEditingService {
             extensionDeltas.put(entry.getKey(), toRelative(ext, entry.getValue(), minX, minY, minZ));
         }
 
-        MapDefinition def = new MapDefinition(draft.gameId(), draft.mapId(), schematicFile,
+        MapDefinition def = new MapDefinition(draft.gameId(), draft.mapId(),
+                draft.displayName().orElse(null), schematicFile,
                 waitingDelta, participantDeltas, extensionDeltas,
                 draft.minPlayers(), draft.maxPlayers());
         persistence.save(def);
@@ -343,10 +392,6 @@ public final class MapEditingService {
         }
     }
 
-    private static BlockVector3 toBlockVector(Location loc) {
-        return BlockVector3.at(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
-    }
-
     @SuppressWarnings({ "unchecked", "rawtypes" })
     private static Object toAbsolute(MapExtension<?> ext, Object value, int ox, int oy, int oz) {
         return ((MapExtension) ext).toAbsolute(value, ox, oy, oz);
@@ -370,11 +415,11 @@ public final class MapEditingService {
     }
 
     /** Converts an absolute-location SpawnPoint into a delta from min-corner. */
-    private static SpawnPoint relativize(SpawnPoint absolute, BlockVector3 min) {
+    private static SpawnPoint relativize(SpawnPoint absolute, int minX, int minY, int minZ) {
         return new SpawnPoint(absolute.id(),
-                absolute.x() - min.x(),
-                absolute.y() - min.y(),
-                absolute.z() - min.z(),
+                absolute.x() - minX,
+                absolute.y() - minY,
+                absolute.z() - minZ,
                 absolute.yaw(), absolute.pitch());
     }
 

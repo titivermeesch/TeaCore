@@ -30,6 +30,12 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
     private volatile ThemeImpl theme;
 
     private final Map<String, String> localeResolutionCache = new ConcurrentHashMap<>();
+    /**
+     * Plugins that have called {@link #registerBundles} along with the locales
+     * they registered. Replayed on {@link #replaceBundles} so {@code /tea reload}
+     * doesn't drop game-plugin translations until the next restart.
+     */
+    private final Map<org.bukkit.plugin.Plugin, List<String>> registeredSources = new ConcurrentHashMap<>();
 
     public MessageServiceImpl(
             BukkitAudiences audiences,
@@ -48,6 +54,12 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
         this.bundles.clear();
         this.bundles.putAll(bundles);
         this.localeResolutionCache.clear();
+        // Re-merge each plugin's contributions on top of the freshly-loaded core
+        // bundles. Without this, /tea reload would wipe every game-plugin key
+        // until the next server restart.
+        for (Map.Entry<org.bukkit.plugin.Plugin, List<String>> entry : registeredSources.entrySet()) {
+            mergePluginBundles(entry.getKey(), entry.getValue());
+        }
     }
 
     public void replaceTheme(ThemeImpl theme) {
@@ -108,6 +120,12 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
 
     @Override
     public void registerBundles(org.bukkit.plugin.Plugin plugin, java.util.List<String> locales) {
+        registeredSources.put(plugin, List.copyOf(locales));
+        mergePluginBundles(plugin, locales);
+        localeResolutionCache.clear();
+    }
+
+    private void mergePluginBundles(org.bukkit.plugin.Plugin plugin, java.util.List<String> locales) {
         for (String locale : locales) {
             LocaleBundle incoming = LocaleBundleLoader.load(plugin, plugin.getDataFolder().toPath(), locale);
             LocaleBundle existing = bundles.get(locale);
@@ -117,7 +135,6 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
             merged.putAll(incoming.entries());
             bundles.put(locale, new LocaleBundle(locale, merged));
         }
-        localeResolutionCache.clear();
     }
 
     @Override
@@ -145,9 +162,31 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
     }
 
     @Override
+    public List<String> renderLegacyLines(String locale, String key, Map<String, String> placeholders) {
+        String template = lookup(locale, key);
+        // Split on real newlines (YAML lists / double-quoted strings) or on the
+        // literal two-char "\n" sequence (single-quoted / plain YAML strings).
+        // Each line is rendered separately so MiniMessage tag scopes don't bleed.
+        String[] parts = template.split("\\\\n|\\r?\\n", -1);
+        List<String> out = new java.util.ArrayList<>(parts.length);
+        for (String part : parts) {
+            out.add(legacySerializer.serialize(renderRaw(part, placeholders)));
+        }
+        return out;
+    }
+
+    @Override
     public String resolveLocale(Player player) {
         String raw = player.getLocale();
         return localeResolutionCache.computeIfAbsent(raw, this::pickBundleLocale);
+    }
+
+    @Override
+    public boolean hasKey(String key) {
+        for (LocaleBundle bundle : bundles.values()) {
+            if (bundle.get(key) != null) return true;
+        }
+        return false;
     }
 
     private String pickBundleLocale(String clientLocale) {

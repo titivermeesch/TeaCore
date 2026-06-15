@@ -19,9 +19,11 @@ import me.playbosswar.tea.core.api.transport.ProxyTransport;
 import me.playbosswar.tea.core.api.effect.EffectService;
 import me.playbosswar.tea.core.api.game.GameRegistry;
 import me.playbosswar.tea.core.api.kit.KitRegistry;
+import me.playbosswar.tea.core.api.achievement.AchievementService;
 import me.playbosswar.tea.core.api.map.MapService;
 import me.playbosswar.tea.core.api.message.MessageService;
 import me.playbosswar.tea.core.api.persistence.DatabaseService;
+import me.playbosswar.tea.core.api.placeholder.PlaceholderService;
 import me.playbosswar.tea.core.api.profile.PlayerProfileService;
 import me.playbosswar.tea.core.api.stats.StatsRegistry;
 import me.playbosswar.tea.core.api.team.TeamManager;
@@ -54,6 +56,14 @@ import me.playbosswar.tea.core.impl.kit.KitSelectorListener;
 import me.playbosswar.tea.core.impl.map.MapEditingService;
 import me.playbosswar.tea.core.impl.map.MapPersistence;
 import me.playbosswar.tea.core.impl.map.MapServiceImpl;
+import me.playbosswar.tea.core.impl.map.MapSetupSidebar;
+import me.playbosswar.tea.core.impl.placeholder.CorePlaceholders;
+import me.playbosswar.tea.core.impl.placeholder.GameStatsPlaceholders;
+import me.playbosswar.tea.core.impl.placeholder.PlaceholderServiceImpl;
+import me.playbosswar.tea.core.impl.placeholder.TeaPlaceholderExpansion;
+import me.playbosswar.tea.core.impl.scoreboard.ScoreboardManager;
+import me.playbosswar.tea.core.impl.achievement.AchievementServiceImpl;
+import me.playbosswar.tea.core.impl.stats.CoreStatsService;
 import me.playbosswar.tea.core.impl.message.LocaleBundle;
 import me.playbosswar.tea.core.impl.message.LocaleBundleLoader;
 import me.playbosswar.tea.core.impl.message.MessageServiceImpl;
@@ -75,7 +85,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             "V001__init.sql",
             "V002__kit_unlocks.sql",
             "V003__lobby_signs.sql",
-            "V004__stats_schemas.sql");
+            "V004__stats_schemas.sql",
+            "V005__core_stats.sql",
+            "V006__achievements.sql");
 
     /**
      * FastStats error tracker. Context-aware so it only captures throwables from
@@ -99,17 +111,25 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private CooldownServiceImpl cooldownService;
     private VaultEconomyService economyService;
     private me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand;
+    // True once the optional lobby features (signs/spawn/play) have been wired up.
+    // Guards against double-registration when /tea reload re-enables them at runtime.
+    private boolean lobbyFeaturesActive;
     private EffectServiceImpl effectService;
     private ChatRouterImpl chatRouterImpl;
     private MatchBroadcasterImpl matchBroadcasterImpl;
     private MapPersistence mapPersistence;
     private MapEditingService mapEditingService;
+    private ScoreboardManager scoreboardManager;
+    private MapSetupSidebar mapSetupSidebar;
     private CoordinationBackend coordinationBackend;
     private ArenaHeartbeater heartbeater;
     private Matchmaker matchmaker;
     private DashboardServer dashboardServer;
     private BungeeChannelTransport proxyTransport;
     private StatsRegistryImpl statsRegistry;
+    private CoreStatsService coreStatsService;
+    private AchievementServiceImpl achievementService;
+    private PlaceholderServiceImpl placeholderService;
     private QueueBossbarService queueBossbarService;
 
     // Declared after the fields it reads so suppliers don't trip Java's
@@ -171,6 +191,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             // MapExtensions in their own onEnable before we deserialize maps from YAML.
             org.bukkit.Bukkit.getScheduler().runTask(this,
                     () -> this.mapEditingService.loadAllAndRegister());
+            this.scoreboardManager = new ScoreboardManager(this);
+            getServer().getPluginManager().registerEvents(scoreboardManager, this);
+            if (getConfig().getBoolean("map-setup-scoreboard.enabled", true)) {
+                this.mapSetupSidebar = new MapSetupSidebar(mapEditingService, messageService);
+                this.scoreboardManager.register(mapSetupSidebar);
+            }
+            this.scoreboardManager.start();
             this.gameRegistry = new GameRegistryImpl(
                     def -> {
                         if (poolManager != null)
@@ -200,6 +227,29 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             });
             this.effectService = new EffectServiceImpl();
             this.statsRegistry = new StatsRegistryImpl(databaseService.dataSource(), getLogger());
+            this.coreStatsService = new CoreStatsService(
+                    this, databaseService.dataSource(), arenaManager, getLogger());
+            getServer().getPluginManager().registerEvents(coreStatsService, this);
+            this.achievementService = new AchievementServiceImpl(
+                    databaseService.dataSource(), getLogger(), messageService);
+
+            // PlaceholderAPI integration. Built-in resolvers cover core/player
+            // stats and every game's stats; games add their own via
+            // placeholders().register(...). The PAPI expansion is only wired up
+            // when PlaceholderAPI is installed - resolution still works for
+            // internal callers either way.
+            this.placeholderService = new PlaceholderServiceImpl();
+            placeholderService.registerGlobal(new CorePlaceholders(this, coreStatsService));
+            placeholderService.registerGlobal(new GameStatsPlaceholders(statsRegistry));
+            if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+                try {
+                    new TeaPlaceholderExpansion(placeholderService, version()).register();
+                    getLogger().info("Registered PlaceholderAPI expansion 'tea'.");
+                } catch (Throwable t) {
+                    getLogger().log(Level.WARNING, "Failed to register PlaceholderAPI expansion", t);
+                    ERROR_TRACKER.trackError(t);
+                }
+            }
 
             this.chatRouterImpl = new ChatRouterImpl(arenaManager, teamManager);
             this.matchBroadcasterImpl = new MatchBroadcasterImpl(messageService);
@@ -254,7 +304,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             getServer().getPluginManager().registerEvents(this.matchmaker, this);
             this.matchmaker.start();
 
-            this.queueBossbarService = new QueueBossbarService(this, coordinationBackend, gameRegistry, messageService);
+            this.queueBossbarService = new QueueBossbarService(this, coordinationBackend, messageService);
             getServer().getPluginManager().registerEvents(queueBossbarService, this);
             this.queueBossbarService.start();
 
@@ -266,12 +316,10 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             }
             // /chat exists to switch between match/team/staff/global channels and
             // is meaningless on a lobby (no in-progress match, no team). When
-            // lobby.enabled is true we hide it from the command map entirely so
-            // tab-complete and /help don't surface a no-op.
+            // lobby.enabled is true enableLobbyFeatures() hides it from the command
+            // map; otherwise wire up its executor here.
             boolean lobbyEnabled = getConfig().getBoolean("lobby.enabled", false);
-            if (lobbyEnabled) {
-                me.playbosswar.tea.core.impl.command.CommandRegistrar.unregister("chat", getLogger());
-            } else {
+            if (!lobbyEnabled) {
                 PluginCommand chatCommand = getCommand("chat");
                 if (chatCommand != null) {
                     TeaChatCommand exec = new TeaChatCommand(this);
@@ -312,30 +360,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             // each lobby/hub server that needs /play, connection signs,
             // spawn auto-management.
             if (lobbyEnabled) {
-                me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService signService = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService(
-                        databaseService.dataSource(), getLogger());
-                signService.loadAll();
-                me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater signUpdater = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater(
-                        this, this, signService);
-                signUpdater.start();
-                getServer().getPluginManager().registerEvents(
-                        new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignListener(this, signService), this);
-
-                me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService spawnService = new me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService(
-                        this, this);
-                getServer().getPluginManager().registerEvents(spawnService, this);
-
-                PluginCommand playCommand = getCommand("play");
-                if (playCommand != null) {
-                    var exec = new me.playbosswar.tea.core.impl.lobby.command.PlayCommand(this, this);
-                    playCommand.setExecutor(exec);
-                    playCommand.setTabCompleter(exec);
-                }
-                // Lobby admin handler is dispatched via /tea lobby ... (see TeaCommand);
-                // there is no longer a top-level /tealobby command.
-                this.lobbyAdminCommand = new me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand(
-                        this, this, signService, spawnService);
-                getLogger().info("Lobby features enabled.");
+                enableLobbyFeatures();
             }
 
             TeaCoreAPI.set(this);
@@ -358,6 +383,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         try {
             if (queueBossbarService != null)
                 queueBossbarService.stop();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (scoreboardManager != null)
+                scoreboardManager.stop();
         } catch (Exception ignored) {
         }
         try {
@@ -434,10 +464,63 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         }
     }
 
+    /**
+     * Wires up the optional lobby features (formerly the TeaLobby plugin):
+     * connection signs, spawn auto-management, and the {@code /play} command.
+     * Idempotent via {@link #lobbyFeaturesActive} so it can be called from
+     * {@code onEnable} at startup and from {@link #reload()} when an admin flips
+     * {@code lobby.enabled} on at runtime, without double-registering listeners.
+     */
+    private void enableLobbyFeatures() {
+        if (lobbyFeaturesActive) return;
+        // /chat switches match/team/staff/global channels and is meaningless on a
+        // lobby, so hide it from tab-complete and /help when lobby mode is on.
+        me.playbosswar.tea.core.impl.command.CommandRegistrar.unregister("chat", getLogger());
+
+        me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService signService = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService(
+                databaseService.dataSource(), getLogger());
+        signService.loadAll();
+        me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater signUpdater = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignUpdater(
+                this, this, signService);
+        signUpdater.start();
+        getServer().getPluginManager().registerEvents(
+                new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignListener(this, signService), this);
+
+        me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService spawnService = new me.playbosswar.tea.core.impl.lobby.spawn.LobbySpawnService(
+                this, this);
+        getServer().getPluginManager().registerEvents(spawnService, this);
+
+        PluginCommand playCommand = getCommand("play");
+        if (playCommand != null) {
+            var exec = new me.playbosswar.tea.core.impl.lobby.command.PlayCommand(this, this);
+            playCommand.setExecutor(exec);
+            playCommand.setTabCompleter(exec);
+        }
+        // Lobby admin handler is dispatched via /tea lobby ... (see TeaCommand);
+        // there is no longer a top-level /tealobby command.
+        this.lobbyAdminCommand = new me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand(
+                this, this, signService, spawnService);
+        this.lobbyFeaturesActive = true;
+        getLogger().info("Lobby features enabled.");
+    }
+
     public void reload() {
         loadConfigAndTheme();
         messageService.replaceTheme(theme);
         messageService.replaceBundles(loadAllBundles());
+
+        // Pick up a runtime flip of lobby.enabled. Enabling at reload is safe
+        // (the wiring is idempotent); disabling is not — listeners and command
+        // executors can't be cleanly torn down without a restart, so warn instead
+        // of pretending it worked.
+        boolean lobbyEnabled = getConfig().getBoolean("lobby.enabled", false);
+        if (lobbyEnabled && !lobbyFeaturesActive) {
+            enableLobbyFeatures();
+        } else if (!lobbyEnabled && lobbyFeaturesActive) {
+            getLogger().warning(
+                    "lobby.enabled was turned off, but lobby features can't be torn down at runtime. "
+                            + "Restart the server to fully disable them.");
+        }
     }
 
     /**
@@ -455,6 +538,18 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
     public MapEditingService mapEditingService() {
         return mapEditingService;
+    }
+
+    public ScoreboardManager scoreboards() {
+        return scoreboardManager;
+    }
+
+    /**
+     * Map-setup sidebar provider, or {@code null} when disabled via
+     * {@code map-setup-scoreboard.enabled}.
+     */
+    public MapSetupSidebar mapSetupSidebar() {
+        return mapSetupSidebar;
     }
 
     /**
@@ -570,6 +665,16 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     }
 
     @Override
+    public PlaceholderService placeholders() {
+        return placeholderService;
+    }
+
+    @Override
+    public AchievementService achievements() {
+        return achievementService;
+    }
+
+    @Override
     public String serverId() {
         return config.network().serverId();
     }
@@ -590,6 +695,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         for (String locale : BUNDLED_LOCALES) {
             saveResource("lang/" + locale + ".yml", false);
         }
+        // Surface any new keys the latest jar shipped without overwriting
+        // anything the admin already customized in their on-disk YAMLs.
+        me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this);
+        me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this, "theme.yml",
+                getDataFolder().toPath().resolve("theme.yml"));
     }
 
     private void loadConfigAndTheme() {

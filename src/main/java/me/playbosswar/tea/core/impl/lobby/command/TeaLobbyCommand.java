@@ -109,7 +109,8 @@ public final class TeaLobbyCommand implements TabExecutor {
         }
         if (args.length == 3 && "sign".equalsIgnoreCase(args[0]) && "bind".equalsIgnoreCase(args[1])) {
             String p = args[2].toLowerCase(Locale.ROOT);
-            return core.games().all().stream().map(g -> g.id().value())
+            // Fleet-wide view; the lobby doesn't load game plugins itself.
+            return core.coordination().allHostedGames().stream().map(GameId::value)
                     .filter(s -> s.startsWith(p)).toList();
         }
         if (args.length == 4 && "sign".equalsIgnoreCase(args[0]) && "bind".equalsIgnoreCase(args[1])) {
@@ -264,7 +265,9 @@ public final class TeaLobbyCommand implements TabExecutor {
             return;
         }
         GameId gameId = GameId.of(args[1].toLowerCase(Locale.ROOT));
-        if (core.games().get(gameId).isEmpty()) {
+        // The lobby validates against the fleet-wide hosted-games view; on a
+        // multi-server deployment the game plugin lives on the arena pods.
+        if (!core.coordination().allHostedGames().contains(gameId)) {
             core.messageService().send(player, "lobby.play.unknown-game",
                     Map.of("game", gameId.value()));
             return;

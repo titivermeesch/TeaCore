@@ -229,12 +229,46 @@ public interface MessageService {
     String renderPlainText(String locale, String key, Map<String, String> placeholders);
 
     /**
+     * Renders a translation key as one or more legacy-coded lines, splitting on
+     * newlines.
+     *
+     * <p>
+     * The bundle entry may be either a YAML string with embedded {@code \n}
+     * sequences (or real newlines from a double-quoted block) or a YAML list,
+     * where each list element becomes a separate line. Empty list / empty string
+     * still returns a list with a single empty element so callers can pass the
+     * result straight to {@link org.bukkit.inventory.meta.ItemMeta#setLore}.
+     *
+     * @param locale       locale code to render in; must not be {@code null}.
+     * @param key          translation key; must not be {@code null}.
+     * @param placeholders placeholder values substituted into the message; never
+     *                     {@code null}.
+     * @return one rendered legacy string per line, never {@code null} or empty.
+     */
+    java.util.List<String> renderLegacyLines(String locale, String key, Map<String, String> placeholders);
+
+    /**
      * Returns the locale currently resolved for a player.
      *
      * @param player player to inspect; must not be {@code null}.
      * @return the locale code (e.g. {@code "en_US"}), never {@code null}.
      */
     String resolveLocale(Player player);
+
+    /**
+     * Reports whether any registered locale bundle defines the given key.
+     *
+     * <p>
+     * Useful when a plugin (e.g. the lobby's stats GUI) wants to render text
+     * for a game whose own lang bundle may not be loaded on this server. If
+     * {@code hasKey} returns {@code false}, the caller can fall back to a
+     * literal label rather than render the {@code <error>missing translation</error>}
+     * placeholder.
+     *
+     * @param key translation key to test; must not be {@code null}.
+     * @return {@code true} if any locale bundle has a value for the key.
+     */
+    boolean hasKey(String key);
 
     /**
      * Registers a plugin's {@code lang/<locale>.yml} bundles into the shared
