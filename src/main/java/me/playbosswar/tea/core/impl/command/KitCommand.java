@@ -60,13 +60,15 @@ public final class KitCommand implements TabExecutor {
                         Map.of("kit", kitId, "game", gameId.value()));
                 return true;
             }
-            plugin.kits().selectKit(player, gameId, kitId);
-            plugin.messageService().send(player, "core.kit-picker.selected",
-                    Map.of("kit", kitId, "game", gameId.value()));
+            // Same rules as the menu: priced kits are bought (or refused) first.
+            plugin.coreMenus().selectKit(player, gameId, kitId);
             return true;
         }
 
-        gui.open(player, gameId);
+        // The YAML kits menu when menus are on; the built-in picker otherwise.
+        if (!plugin.menus().open(player, "kits", Map.of("game", gameId.value()))) {
+            gui.open(player, gameId);
+        }
         return true;
     }
 

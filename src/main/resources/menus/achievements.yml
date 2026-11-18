@@ -1,0 +1,29 @@
+# Achievements of every game (argument game narrows to one).
+# Per achievement: {name} {desc} {status} {unlocked} {game} {game_name} {achievement_id}
+enabled: true
+title: "<primary>Achievements"
+rows: 5
+pattern:
+  - "#########"
+  - "#AAAAAAA#"
+  - "#AAAAAAA#"
+  - "#AAAAAAA#"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'A':
+    source: achievements
+    item:
+      name: "{name}"
+      glow: "{unlocked}"
+      lore:
+        - "{desc}"
+        - ""
+        - "{status}"
+        - "<muted>{game_name}"
+    empty: { material: BARRIER, name: "<muted>No achievements yet" }

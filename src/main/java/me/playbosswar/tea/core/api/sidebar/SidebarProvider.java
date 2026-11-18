@@ -1,12 +1,12 @@
-package me.playbosswar.tea.core.impl.scoreboard;
+package me.playbosswar.tea.core.api.sidebar;
 
 import java.util.List;
 import java.util.Optional;
 import org.bukkit.entity.Player;
 
 /**
- * Contributes sidebar content to the {@link ScoreboardManager}. A feature
- * implements this instead of standing up its own Bukkit scoreboard: the manager
+ * Contributes sidebar content to the {@link SidebarService}. A feature
+ * implements this instead of standing up its own Bukkit scoreboard: the service
  * polls every registered provider per player and renders the highest-priority
  * one that applies.
  */

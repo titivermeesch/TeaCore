@@ -1,0 +1,34 @@
+# Map picker for one game (argument: game).
+# Per map: {map_id} {map_name} {min} {max} {players} {game} {game_name}
+enabled: true
+title: "<primary>Choose a map"
+rows: 5
+refresh-ticks: 20
+pattern:
+  - "####Q####"
+  - "#MMMMMMM#"
+  - "#MMMMMMM#"
+  - "#MMMMMMM#"
+  - "B#<#A#>#X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'Q': { material: NETHER_STAR, name: "<success><bold>Quick join", lore: ["<muted>Any map, fastest start"], actions: ["play:{game}", "sound:UI_BUTTON_CLICK"] }
+  'A': { material: COMPASS, name: "<primary>Live arenas", lore: ["<muted>Join or spectate a specific arena"], action: "open-menu:arenas game={game}" }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'M':
+    source: maps
+    item:
+      name: "<primary>{map_name}"
+      lore:
+        - "<secondary>Players: <highlight>{min}-{max}"
+        - "<secondary>Playing now: <highlight>{players}"
+        - ""
+        - "<success>Left-click to play this map"
+        - "<muted>Right-click to see its arenas"
+      left-actions: ["play:{game} {map_id}", "sound:UI_BUTTON_CLICK"]
+      right-actions: ["open-menu:arenas game={game} map={map_id}"]
+    empty: { material: BARRIER, name: "<muted>No maps for this game" }

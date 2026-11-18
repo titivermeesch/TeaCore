@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.playbosswar.tea.core.api.message.MessageService;
-import me.playbosswar.tea.core.impl.scoreboard.SidebarProvider;
+import me.playbosswar.tea.core.api.sidebar.SidebarProvider;
 import org.bukkit.entity.Player;
 
 /**
@@ -20,6 +20,12 @@ import org.bukkit.entity.Player;
  * free. Registered with the {@link me.playbosswar.tea.core.impl.scoreboard.ScoreboardManager}.
  */
 public final class MapSetupSidebar implements SidebarProvider {
+
+    /** Above game (100) and lobby (50) layouts: an admin editing a map needs the checklist. */
+    @Override
+    public int priority() {
+        return 200;
+    }
 
     private static final int WINDOW = 3;
 

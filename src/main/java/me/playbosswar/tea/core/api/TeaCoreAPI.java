@@ -260,6 +260,50 @@ public interface TeaCoreAPI {
     AchievementService achievements();
 
     /**
+     * Shared damage history and kill credit (killer + assists) for players in
+     * live arenas. Games that fake deaths report them here so core stats and
+     * {@link me.playbosswar.tea.core.api.combat.ArenaKillEvent} stay correct.
+     *
+     * @return the combat tracker, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.combat.CombatTracker combat();
+
+    /**
+     * Config-driven weighted loot tables with pluggable custom items.
+     *
+     * @return the loot service, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.loot.LootService loot();
+
+    /**
+     * On/off switches for optional features ({@code features:} in config.yml).
+     *
+     * @return the feature switches, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.feature.FeatureService features();
+
+    /**
+     * Per-player sidebars: register a game's YAML layout or a custom provider.
+     *
+     * @return the sidebar service, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.sidebar.SidebarService sidebars();
+
+    /**
+     * YAML-defined inventory menus with pluggable list sources and click actions.
+     *
+     * @return the menu service, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.menu.MenuService menus();
+
+    /**
+     * Finished matches with each participant's result and K/D/A.
+     *
+     * @return the match history service, never {@code null}.
+     */
+    me.playbosswar.tea.core.api.history.MatchHistoryService matchHistory();
+
+    /**
      * Returns the initialized singleton instance.
      *
      * @return the running TeaCore API, never {@code null}.

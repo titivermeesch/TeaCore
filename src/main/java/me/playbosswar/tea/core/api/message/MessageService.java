@@ -256,6 +256,14 @@ public interface MessageService {
     String resolveLocale(Player player);
 
     /**
+     * The server's default locale ({@code i18n.default-locale}), for text that is
+     * shared by every viewer or rendered without a player.
+     *
+     * @return the locale code, never {@code null}.
+     */
+    String defaultLocale();
+
+    /**
      * Reports whether any registered locale bundle defines the given key.
      *
      * <p>

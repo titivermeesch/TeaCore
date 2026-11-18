@@ -52,7 +52,24 @@ public final class PlayerStatsCommand implements TabExecutor {
             targetName = player.getName();
         }
 
-        gui.open(player, targetUuid, targetName);
+        // The YAML stats menu when menus are on; the built-in viewer otherwise.
+        var stats = plugin.coreStats().statsOf(targetUuid);
+        Map<String, String> menuArgs = new java.util.HashMap<>();
+        menuArgs.put("target", targetName);
+        menuArgs.put("target_uuid", targetUuid.toString());
+        menuArgs.put("wins", String.valueOf(stats.wins()));
+        menuArgs.put("losses", String.valueOf(stats.losses()));
+        menuArgs.put("games_played", String.valueOf(stats.gamesPlayed()));
+        menuArgs.put("kills", String.valueOf(stats.kills()));
+        menuArgs.put("deaths", String.valueOf(stats.deaths()));
+        menuArgs.put("assists", String.valueOf(stats.assists()));
+        menuArgs.put("winrate", stats.gamesPlayed() == 0 ? "0.0" : String.format(java.util.Locale.ROOT, "%.1f",
+                100.0 * stats.wins() / stats.gamesPlayed()));
+        menuArgs.put("kdr", String.format(java.util.Locale.ROOT, "%.2f",
+                (double) stats.kills() / Math.max(1, stats.deaths())));
+        if (!plugin.menus().open(player, "stats", menuArgs)) {
+            gui.open(player, targetUuid, targetName);
+        }
         return true;
     }
 

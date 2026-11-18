@@ -3,6 +3,7 @@ package me.playbosswar.tea.core.api.game;
 import java.util.List;
 import java.util.Objects;
 import me.playbosswar.tea.core.api.team.TeamDefinition;
+import org.bukkit.Material;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,6 +30,8 @@ import org.jetbrains.annotations.Nullable;
  * @param arenaWorld     world-setup and gamemode preferences applied when arenas of
  *                       this game are allocated and when players join/leave; never
  *                       {@code null}.
+ * @param icon           item shown for the game in menus (game selector, stats);
+ *                       defaults to {@link Material#PAPER}.
  */
 public record GameDefinition(
         GameId id,
@@ -40,7 +43,8 @@ public record GameDefinition(
         MapSelectionPolicy mapSelection,
         PoolConfig pool,
         EndMode endMode,
-        ArenaWorldConfig arenaWorld) {
+        ArenaWorldConfig arenaWorld,
+        Material icon) {
 
     /**
      * Canonical constructor that validates required fields and defensively copies
@@ -60,6 +64,7 @@ public record GameDefinition(
         Objects.requireNonNull(pool, "pool");
         Objects.requireNonNull(endMode, "endMode");
         Objects.requireNonNull(arenaWorld, "arenaWorld");
+        icon = icon == null ? Material.PAPER : icon;
         teams = teams == null ? List.of() : List.copyOf(teams);
         if (teamMode == TeamMode.TEAMS && teams.isEmpty()) {
             throw new IllegalArgumentException("TEAMS mode requires at least one team declared");
@@ -97,6 +102,7 @@ public record GameDefinition(
         private PoolConfig pool = PoolConfig.defaults();
         private EndMode endMode = EndMode.RESET;
         private ArenaWorldConfig arenaWorld = ArenaWorldConfig.defaults().build();
+        private Material icon = Material.PAPER;
 
         private Builder(GameId id, Plugin plugin) {
             this.id = id;
@@ -194,6 +200,17 @@ public record GameDefinition(
         }
 
         /**
+         * Sets the item shown for this game in menus such as the game selector.
+         *
+         * @param v the icon material; {@code null} means {@link Material#PAPER}.
+         * @return this builder, for chaining.
+         */
+        public Builder icon(Material v) {
+            this.icon = v;
+            return this;
+        }
+
+        /**
          * Builds the immutable definition.
          *
          * @return a new {@link GameDefinition}, never {@code null}.
@@ -202,7 +219,7 @@ public record GameDefinition(
          */
         public GameDefinition build() {
             return new GameDefinition(id, plugin, displayNameKey,
-                    teamMode, teams, lifecycle, mapSelection, pool, endMode, arenaWorld);
+                    teamMode, teams, lifecycle, mapSelection, pool, endMode, arenaWorld, icon);
         }
     }
 }

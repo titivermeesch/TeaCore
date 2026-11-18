@@ -1,0 +1,35 @@
+# Stats viewer, opened with /stats [player].
+# Menu values: {target} {wins} {losses} {games_played} {kills} {deaths}
+# {assists} {winrate} {kdr}. Per game: {game_id} {game_name} {lines} {has_data}.
+enabled: true
+title: "<primary>Stats: {target}"
+rows: 4
+pattern:
+  - "####S####"
+  - "#GGGGGGG#"
+  - "#GGGGGGG#"
+  - "B##<X>###"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'S':
+    material: PLAYER_HEAD
+    skull-owner: "{target}"
+    name: "<primary><bold>{target}"
+    lore:
+      - "<secondary>Wins: <accent>{wins}</accent> <muted>/</muted> Losses: <accent>{losses}"
+      - "<secondary>Win rate: <accent>{winrate}%"
+      - "<secondary>Kills: <accent>{kills}</accent> <muted>/</muted> Deaths: <accent>{deaths}"
+      - "<secondary>Assists: <accent>{assists}</accent> <muted>/</muted> KDR: <accent>{kdr}"
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+lists:
+  'G':
+    source: stats-games
+    item:
+      material: PAPER
+      name: "<primary>{game_name}"
+      lore:
+        - "{lines}"
+    empty: { material: BARRIER, name: "<muted>No games with stats" }

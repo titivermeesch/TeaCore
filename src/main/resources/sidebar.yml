@@ -1,0 +1,19 @@
+# Lobby sidebar, shown to players who are not in an arena on a server with
+# lobby.enabled: true. Turn it off here (enabled: false), for the whole server
+# (features.lobby-sidebar in config.yml), or per player with /board.
+#
+# Lines are MiniMessage with theme tags (<primary>, <secondary>, <accent>, ...).
+# Placeholders: <player>, <online>, and any %placeholderapi% placeholder.
+# Game sidebars live in each game's own config (sidebar: section).
+lobby:
+  enabled: true
+  title: "<primary><bold>Tea</bold></primary>"
+  lines:
+    - ""
+    - "<secondary>Player:</secondary> <highlight><player></highlight>"
+    - "<secondary>Online:</secondary> <highlight><online></highlight>"
+    - ""
+    - "<secondary>Wins:</secondary> <accent>%tea_wins%</accent>"
+    - "<secondary>Kills:</secondary> <accent>%tea_kills%</accent>"
+    - ""
+    - "<muted>/play to join a game</muted>"

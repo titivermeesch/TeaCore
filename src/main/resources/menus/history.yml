@@ -1,0 +1,30 @@
+# Your recent matches, newest first (argument target_uuid shows someone else's).
+# Per match: {result} {result_label} {game} {game_name} {map_name} {kills}
+# {deaths} {assists} {team} {duration} {when}
+enabled: true
+title: "<primary>Match history"
+rows: 6
+pattern:
+  - "#########"
+  - "#MMMMMMM#"
+  - "#MMMMMMM#"
+  - "#MMMMMMM#"
+  - "#MMMMMMM#"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'M':
+    source: match-history
+    item:
+      name: "{result_label} <muted>- {game_name}"
+      lore:
+        - "<secondary>Map: <highlight>{map_name}"
+        - "<secondary>Kills <accent>{kills}</accent> <muted>/</muted> Deaths <accent>{deaths}</accent> <muted>/</muted> Assists <accent>{assists}"
+        - "<secondary>Length: <highlight>{duration}"
+        - "<muted>{when} ago"
+    empty: { material: BARRIER, name: "<muted>No matches played yet" }

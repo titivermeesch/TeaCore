@@ -1,0 +1,20 @@
+# Pick a game, then its kit.
+enabled: true
+title: "<primary>Kits"
+rows: 3
+pattern:
+  - "#########"
+  - "#GGGGGGG#"
+  - "B#######X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'G':
+    source: games
+    item:
+      name: "<primary>{game_name}"
+      lore: ["<muted>Click to choose a kit"]
+      action: "open-menu:kits game={game_id}"
+    empty: { material: BARRIER, name: "<muted>No games" }

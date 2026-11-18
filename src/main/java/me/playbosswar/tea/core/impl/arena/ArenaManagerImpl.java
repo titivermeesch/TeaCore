@@ -49,6 +49,13 @@ public final class ArenaManagerImpl implements ArenaManager {
     private final ConcurrentHashMap<ArenaId, ArenaImpl> arenas = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, ArenaId> playerArena = new ConcurrentHashMap<>();
 
+    /** Set after construction (TeamManagerImpl itself depends on this manager). */
+    private me.playbosswar.tea.core.api.team.TeamManager teamManager;
+
+    public void setTeamManager(me.playbosswar.tea.core.api.team.TeamManager teamManager) {
+        this.teamManager = teamManager;
+    }
+
     public ArenaManagerImpl(Plugin plugin, GameRegistry gameRegistry, MapService mapService, Logger logger) {
         this.plugin = plugin;
         this.gameRegistry = gameRegistry;
@@ -161,6 +168,26 @@ public final class ArenaManagerImpl implements ArenaManager {
 
     @Override
     public void endMatch(ArenaId id, @Nullable UUID winnerUuid) {
+        end(id, winnerUuid, null);
+    }
+
+    @Override
+    public void endMatchForTeam(ArenaId id, @Nullable me.playbosswar.tea.core.api.team.TeamId winningTeam) {
+        UUID representative = null;
+        ArenaImpl arena = arenas.get(id);
+        if (arena != null && winningTeam != null && teamManager != null) {
+            for (UUID uuid : arena.players()) {
+                if (teamManager.teamOf(id, uuid).map(t -> t.id().equals(winningTeam)).orElse(false)) {
+                    representative = uuid;
+                    break;
+                }
+            }
+        }
+        end(id, representative, winningTeam);
+    }
+
+    private void end(ArenaId id, @Nullable UUID winnerUuid,
+                     @Nullable me.playbosswar.tea.core.api.team.TeamId winningTeam) {
         ArenaImpl arena = arenas.get(id);
         if (arena == null)
             return;
@@ -184,7 +211,7 @@ public final class ArenaManagerImpl implements ArenaManager {
             return;
         }
         transition(arena, ArenaState.ENDING, def.lifecycle().endingSeconds());
-        Bukkit.getPluginManager().callEvent(new MatchEndEvent(arena, winnerUuid));
+        Bukkit.getPluginManager().callEvent(new MatchEndEvent(arena, winnerUuid, winningTeam));
     }
 
     @Override

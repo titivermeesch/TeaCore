@@ -63,7 +63,24 @@ public final class ConfigLoader {
             "lobby.spawn.y",
             "lobby.spawn.z",
             "lobby.spawn.yaw",
-            "lobby.spawn.pitch");
+            "lobby.spawn.pitch",
+            "lobby.hotbar",
+            "lobby.hotbar.items",
+            "features",
+            "features.sidebar",
+            "features.lobby-sidebar",
+            "features.menus",
+            "features.placeholders",
+            "features.queue-bossbar",
+            "features.lobby-hotbar",
+            "features.match-history",
+            "features.games",
+            "combat",
+            "combat.kill-credit-window-ms",
+            "combat.assist-window-ms",
+            "leaderboards",
+            "leaderboards.refresh-seconds",
+            "game-display");
 
     private ConfigLoader() {
     }
@@ -74,7 +91,8 @@ public final class ConfigLoader {
         if (logger != null) {
             for (String key : yaml.getKeys(true)) {
                 // Dynamic sections (per-game pool overrides) aren't in KNOWN_KEYS.
-                if (key.startsWith("arena-pool.games."))
+                if (key.startsWith("arena-pool.games.") || key.startsWith("features.games.")
+                        || key.startsWith("game-display."))
                     continue;
                 if (!KNOWN_KEYS.contains(key)) {
                     logger.warning("Unknown config key '" + key + "' in "

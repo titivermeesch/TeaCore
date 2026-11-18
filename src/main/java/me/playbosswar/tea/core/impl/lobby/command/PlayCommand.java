@@ -41,7 +41,10 @@ public final class PlayCommand implements TabExecutor {
             return true;
         }
         if (args.length == 0) {
-            core.messageService().send(player, "lobby.play.usage");
+            // The game selector menu when menus are on; the usage line otherwise.
+            if (!core.menus().open(player, "play", java.util.Map.of())) {
+                core.messageService().send(player, "lobby.play.usage");
+            }
             return true;
         }
 

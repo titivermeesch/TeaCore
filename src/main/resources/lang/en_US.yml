@@ -1,4 +1,19 @@
 core:
+  history:
+    win: "<success>Win</success>"
+    loss: "<error>Loss</error>"
+    draw: "<warning>Draw</warning>"
+  achievements:
+    unlocked: "<success>Unlocked</success>"
+    locked: "<muted>Locked</muted>"
+  menu:
+    usage: "<secondary>Usage:</secondary> <accent>/menu <id> [player]</accent>"
+    unknown: "<error>No menu called <id>, or it is turned off.</error>"
+    no-permission: "<error>You can't open that menu.</error>"
+    player-offline: "<error><player> is not online.</error>"
+  board:
+    hidden: "<secondary>Sidebar hidden.</secondary> <muted>Type</muted> <accent>/board</accent> <muted>to show it again.</muted>"
+    shown: "<success>Sidebar shown.</success>"
   reload:
     success: "<success>Configuration reloaded.</success>"
     failed: "<error>Reload failed: <reason></error>"

@@ -1,0 +1,15 @@
+# Profile hub. Opened by /profile and the lobby profile item.
+enabled: true
+title: "<primary>{player}"
+rows: 3
+pattern:
+  - "#########"
+  - "##S#A#H##"
+  - "####K###X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'S': { material: PAPER, name: "<primary>Stats", lore: ["<secondary>Wins: <accent>%tea_wins%</accent>  Kills: <accent>%tea_kills%"], action: "command:stats" }
+  'A': { material: GOLD_INGOT, name: "<primary>Achievements", lore: ["<secondary>Unlocked: <accent>%tea_achievements_unlocked%"], action: "open-menu:achievements" }
+  'H': { material: CLOCK, name: "<primary>Match history", lore: ["<muted>Your recent matches"], action: "open-menu:history" }
+  'K': { material: CHEST, name: "<primary>Kits", lore: ["<muted>Choose a kit for each game"], action: "open-menu:profile-kits" }
+  'X': { material: BARRIER, name: "<error>Close", action: close }

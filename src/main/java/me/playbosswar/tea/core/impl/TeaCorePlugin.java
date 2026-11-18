@@ -87,7 +87,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             "V003__lobby_signs.sql",
             "V004__stats_schemas.sql",
             "V005__core_stats.sql",
-            "V006__achievements.sql");
+            "V006__achievements.sql",
+            "V007__core_assists.sql",
+            "V008__match_history.sql");
 
     /**
      * FastStats error tracker. Context-aware so it only captures throwables from
@@ -129,6 +131,16 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private StatsRegistryImpl statsRegistry;
     private CoreStatsService coreStatsService;
     private AchievementServiceImpl achievementService;
+    private me.playbosswar.tea.core.impl.combat.CombatTrackerImpl combatTracker;
+    private me.playbosswar.tea.core.impl.loot.LootServiceImpl lootService;
+    private me.playbosswar.tea.core.impl.feature.FeatureServiceImpl featureService;
+    private me.playbosswar.tea.core.impl.sidebar.ArenaValues arenaValues;
+    private me.playbosswar.tea.core.impl.sidebar.SidebarServiceImpl sidebarService;
+    private org.bukkit.configuration.file.YamlConfiguration sidebarYaml;
+    private me.playbosswar.tea.core.impl.placeholder.LeaderboardCache leaderboardCache;
+    private me.playbosswar.tea.core.impl.menu.MenuServiceImpl menuService;
+    private me.playbosswar.tea.core.impl.menu.CoreMenus coreMenus;
+    private me.playbosswar.tea.core.impl.history.MatchHistoryServiceImpl matchHistory;
     private PlaceholderServiceImpl placeholderService;
     private QueueBossbarService queueBossbarService;
 
@@ -212,6 +224,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.arenaManager = new ArenaManagerImpl(this, gameRegistry, mapService, getLogger());
 
             this.teamManager = new TeamManagerImpl(arenaManager, gameRegistry);
+            arenaManager.setTeamManager(teamManager);
             this.kitRegistry = new KitRegistryImpl(databaseService.dataSource(), getLogger());
             this.cooldownService = new CooldownServiceImpl(this);
             this.cooldownService.start();
@@ -227,8 +240,73 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             });
             this.effectService = new EffectServiceImpl();
             this.statsRegistry = new StatsRegistryImpl(databaseService.dataSource(), getLogger());
+            this.combatTracker = new me.playbosswar.tea.core.impl.combat.CombatTrackerImpl(
+                    this, arenaManager, teamManager);
+            getServer().getPluginManager().registerEvents(combatTracker, this);
+            this.lootService = new me.playbosswar.tea.core.impl.loot.LootServiceImpl(getLogger());
+            this.featureService = new me.playbosswar.tea.core.impl.feature.FeatureServiceImpl(this);
+            this.arenaValues = new me.playbosswar.tea.core.impl.sidebar.ArenaValues(
+                    this, () -> getConfig().getString("i18n.default-locale", "en_US"));
+            getServer().getPluginManager().registerEvents(arenaValues, this);
+            loadSidebarYaml();
+            this.sidebarService = new me.playbosswar.tea.core.impl.sidebar.SidebarServiceImpl(
+                    this, scoreboardManager, featureService, arenaValues,
+                    () -> sidebarYaml.getConfigurationSection("lobby"),
+                    () -> getConfig().getBoolean("lobby.enabled", false));
+            this.menuService = new me.playbosswar.tea.core.impl.menu.MenuServiceImpl(
+                    this, messageService, featureService, getLogger());
+            getServer().getPluginManager().registerEvents(menuService, this);
+            me.playbosswar.tea.core.impl.menu.GameDisplay gameDisplay =
+                    new me.playbosswar.tea.core.impl.menu.GameDisplay(this, this);
+            arenaValues.setGameDisplay(gameDisplay);
+            this.coreMenus = new me.playbosswar.tea.core.impl.menu.CoreMenus(this, gameDisplay);
+            coreMenus.register(menuService);
+            this.matchHistory = new me.playbosswar.tea.core.impl.history.MatchHistoryServiceImpl(
+                    this, this, databaseService.dataSource(), getLogger());
+            getServer().getPluginManager().registerEvents(matchHistory, this);
+            new me.playbosswar.tea.core.impl.menu.PlayMenus(this, this, matchHistory, gameDisplay).register(menuService);
+            for (String file : List.of("kits", "stats", "play", "play-maps", "arenas", "profile",
+                    "profile-kits", "achievements", "history")) {
+                menuService.registerMenu(this, "menus/" + file + ".yml");
+            }
+            getServer().getPluginManager().registerEvents(
+                    new me.playbosswar.tea.core.impl.lobby.hotbar.LobbyHotbarService(this, this), this);
+            PluginCommand profileCommand = getCommand("profile");
+            if (profileCommand != null) {
+                profileCommand.setExecutor((sender, cmd, label, args) -> {
+                    if (sender instanceof org.bukkit.entity.Player player) {
+                        if (!menuService.open(player, "profile", java.util.Map.of())) {
+                            player.performCommand("stats");
+                        }
+                    } else {
+                        messageService.sendToSender(sender, "core.command.player-only");
+                    }
+                    return true;
+                });
+            }
+            menuService.loadCustomMenus();
+            menuService.start();
+            PluginCommand menuCommand = getCommand("menu");
+            if (menuCommand != null) {
+                var exec = new me.playbosswar.tea.core.impl.command.MenuCommand(this, menuService);
+                menuCommand.setExecutor(exec);
+                menuCommand.setTabCompleter(exec);
+            }
+            PluginCommand boardCommand = getCommand("board");
+            if (boardCommand != null) {
+                boardCommand.setExecutor((sender, cmd, label, args) -> {
+                    if (!(sender instanceof org.bukkit.entity.Player player)) {
+                        messageService.sendToSender(sender, "core.command.player-only");
+                        return true;
+                    }
+                    boolean hide = !sidebarService.isHidden(player);
+                    sidebarService.setHidden(player, hide);
+                    messageService.send(player, hide ? "core.board.hidden" : "core.board.shown");
+                    return true;
+                });
+            }
             this.coreStatsService = new CoreStatsService(
-                    this, databaseService.dataSource(), arenaManager, getLogger());
+                    this, databaseService.dataSource(), arenaManager, teamManager, getLogger());
             getServer().getPluginManager().registerEvents(coreStatsService, this);
             this.achievementService = new AchievementServiceImpl(
                     databaseService.dataSource(), getLogger(), messageService);
@@ -239,9 +317,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             // when PlaceholderAPI is installed - resolution still works for
             // internal callers either way.
             this.placeholderService = new PlaceholderServiceImpl();
-            placeholderService.registerGlobal(new CorePlaceholders(this, coreStatsService));
+            this.leaderboardCache = new me.playbosswar.tea.core.impl.placeholder.LeaderboardCache(
+                    this, databaseService.dataSource(), statsRegistry, getLogger());
+            leaderboardCache.start();
+            placeholderService.registerGlobal(new CorePlaceholders(this, coreStatsService, arenaValues, leaderboardCache));
             placeholderService.registerGlobal(new GameStatsPlaceholders(statsRegistry));
-            if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null
+                    && getConfig().getBoolean("features.placeholders", true)) {
                 try {
                     new TeaPlaceholderExpansion(placeholderService, version()).register();
                     getLogger().info("Registered PlaceholderAPI expansion 'tea'.");
@@ -388,6 +470,10 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         try {
             if (scoreboardManager != null)
                 scoreboardManager.stop();
+            if (leaderboardCache != null)
+                leaderboardCache.stop();
+            if (menuService != null)
+                menuService.stop();
         } catch (Exception ignored) {
         }
         try {
@@ -506,6 +592,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
     public void reload() {
         loadConfigAndTheme();
+        reloadConfig();
+        loadSidebarYaml();
+        if (menuService != null) {
+            menuService.reload();
+        }
         messageService.replaceTheme(theme);
         messageService.replaceBundles(loadAllBundles());
 
@@ -675,6 +766,46 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     }
 
     @Override
+    public me.playbosswar.tea.core.api.combat.CombatTracker combat() {
+        return combatTracker;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.loot.LootService loot() {
+        return lootService;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.feature.FeatureService features() {
+        return featureService;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.sidebar.SidebarService sidebars() {
+        return sidebarService;
+    }
+
+    /** Kit purchase/selection and other core menu logic (internal). */
+    public me.playbosswar.tea.core.impl.menu.CoreMenus coreMenus() {
+        return coreMenus;
+    }
+
+    /** TeaCore's game-agnostic stats (internal; used by the stats menu). */
+    public CoreStatsService coreStats() {
+        return coreStatsService;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.history.MatchHistoryService matchHistory() {
+        return matchHistory;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.menu.MenuService menus() {
+        return menuService;
+    }
+
+    @Override
     public String serverId() {
         return config.network().serverId();
     }
@@ -692,6 +823,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private void saveDefaultResources() {
         saveDefaultConfig();
         saveResource("theme.yml", false);
+        if (!getDataFolder().toPath().resolve("sidebar.yml").toFile().exists()) {
+            saveResource("sidebar.yml", false);
+        }
         for (String locale : BUNDLED_LOCALES) {
             saveResource("lang/" + locale + ".yml", false);
         }
@@ -700,6 +834,14 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this);
         me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this, "theme.yml",
                 getDataFolder().toPath().resolve("theme.yml"));
+        me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this, "sidebar.yml",
+                getDataFolder().toPath().resolve("sidebar.yml"));
+    }
+
+    /** (Re)reads plugins/TeaCore/sidebar.yml (the lobby sidebar layout). */
+    private void loadSidebarYaml() {
+        this.sidebarYaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(
+                getDataFolder().toPath().resolve("sidebar.yml").toFile());
     }
 
     private void loadConfigAndTheme() {

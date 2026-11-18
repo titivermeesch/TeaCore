@@ -1,0 +1,1 @@
+ALTER TABLE tea_core_stats ADD COLUMN assists INT NOT NULL DEFAULT 0;

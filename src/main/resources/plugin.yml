@@ -31,6 +31,19 @@ commands:
     description: Open the stats viewer GUI; admins can pass a player name
     permission: tea.stats
     usage: /stats [player]
+  profile:
+    description: Open your profile (stats, achievements, history, kits)
+    permission: tea.menu
+    usage: /profile
+  menu:
+    description: Open a menu by id (admins can open one for another player)
+    permission: tea.menu
+    usage: /menu <id> [player]
+  board:
+    description: Show or hide your sidebar
+    aliases: [sidebar]
+    permission: tea.board
+    usage: /board
   play:
     description: Queue for a game, optionally filtering by map (lobby feature)
     permission: tea.lobby.play
@@ -79,6 +92,15 @@ permissions:
     default: true
   tea.stats:
     description: View your own stats via /tea stats (admins with tea.admin can view other players)
+    default: true
+  tea.menu:
+    description: Use /menu to open menus (a menu file can require its own permission)
+    default: true
+  tea.menu.others:
+    description: Open a menu for another player with /menu <id> <player>
+    default: op
+  tea.board:
+    description: Toggle your own sidebar with /board
     default: true
   tea.lobby.play:
     description: Queue for a game from the lobby via /play

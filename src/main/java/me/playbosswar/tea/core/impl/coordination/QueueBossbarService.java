@@ -60,7 +60,9 @@ public final class QueueBossbarService implements Listener {
 
     private void tick() {
         Set<UUID> stillQueued = new HashSet<>();
-        for (Player p : Bukkit.getOnlinePlayers()) {
+        // features.queue-bossbar: false hides every bar (removed below).
+        boolean enabled = plugin.getConfig().getBoolean("features.queue-bossbar", true);
+        for (Player p : enabled ? Bukkit.getOnlinePlayers() : java.util.List.<Player>of()) {
             QueueEntry entry = backend.queueEntryOf(p.getUniqueId()).orElse(null);
             if (entry == null)
                 continue;

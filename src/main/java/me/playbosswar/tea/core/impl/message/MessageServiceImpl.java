@@ -182,6 +182,11 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
     }
 
     @Override
+    public String defaultLocale() {
+        return defaultLocale;
+    }
+
+    @Override
     public boolean hasKey(String key) {
         for (LocaleBundle bundle : bundles.values()) {
             if (bundle.get(key) != null) return true;

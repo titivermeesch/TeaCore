@@ -1,0 +1,32 @@
+# Kit picker, opened with /kit <game> and by games' kit items.
+# Values per kit: {kit_id} {kit_name} {kit_desc} {kit_cost} {kit_status}
+# {selected} {locked} {unlocked} {game}. Menu values: {game} {page} {pages}.
+enabled: true
+title: "<primary>Choose a kit"
+rows: 4
+pattern:
+  - "#########"
+  - "#KKKKKKK#"
+  - "#KKKKKKK#"
+  - "B##<X>###"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+lists:
+  'K':
+    source: kits
+    item:
+      name: "{kit_name}"
+      glow: "{selected}"
+      lore:
+        - "{kit_desc}"
+        - "{kit_status}"
+        - ""
+        - "<muted>Click to select"
+      actions:
+        - "kit-select:{game} {kit_id}"
+        - "sound:UI_BUTTON_CLICK"
+    empty: { material: BARRIER, name: "<muted>This game has no kits" }

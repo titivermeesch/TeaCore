@@ -49,6 +49,39 @@ arena-pool:
     #   max-total: 4
     #   preload-on-startup: 0
 
+# Optional features. Everything is on by default; set a key to false to turn
+# that feature off server-wide. Under games.<id> you can override any key for
+# one game (e.g. games.fireball.sidebar: false).
+features:
+  # Every TeaCore sidebar (lobby + in-game). Players can also hide theirs with /board.
+  sidebar: true
+  # The lobby sidebar (layout in sidebar.yml). Needs lobby.enabled.
+  lobby-sidebar: true
+  # Inventory menus (layouts in menus/*.yml, each with its own enabled flag).
+  menus: true
+  # The %tea_...% PlaceholderAPI expansion (when PlaceholderAPI is installed).
+  placeholders: true
+  # The queue position bossbar while waiting for a match.
+  queue-bossbar: true
+  # Lobby hotbar items (lobby.hotbar.items below). Needs lobby.enabled.
+  lobby-hotbar: true
+  # Record finished matches (game, map, winner, each player's K/D/A) for the
+  # match history menu.
+  match-history: true
+  games: {}
+
+# Leaderboard placeholders (%tea_top_...%) are read from the database in the
+# background this often (seconds, minimum 10). Needs a restart to change.
+leaderboards:
+  refresh-seconds: 60
+
+# Kill credit for players in live arenas. The last enemy to hit a player within
+# kill-credit-window-ms gets the kill; every other enemy who hit them within
+# assist-window-ms gets an assist. Teammates never count.
+combat:
+  kill-credit-window-ms: 6000
+  assist-window-ms: 8000
+
 dashboard:
   # The management dashboard is distributed: every backend mirrors its events
   # into the coordination backend (Redis or in-memory) so one dashboard can
@@ -103,3 +136,29 @@ lobby:
     z: 0.5
     yaw: 0.0
     pitch: 0.0
+
+  # Items players get in the lobby (needs features.lobby-hotbar). They cannot
+  # be moved or dropped, and disappear when the player joins an arena.
+  # Each item: slot (0-8), material, name, lore, and either menu (a menu id)
+  # or command (run as the player). Text is MiniMessage; <player> and
+  # %placeholderapi% placeholders work.
+  hotbar:
+    items:
+      - slot: 0
+        material: COMPASS
+        name: "<primary><bold>Play</bold> <muted>(right-click)"
+        lore: ["<secondary>Pick a game and a map"]
+        menu: play
+      - slot: 4
+        material: BOOK
+        name: "<primary><bold>Profile</bold> <muted>(right-click)"
+        lore: ["<secondary>Stats, achievements, history and kits"]
+        menu: profile
+
+# How games look in menus, sidebars and placeholders. Set this on lobby
+# servers that do not run a game's plugin, or to override a game's own name
+# and icon anywhere.
+game-display: {}
+#  fireball:
+#    name: "<red>Fireball"
+#    icon: FIRE_CHARGE

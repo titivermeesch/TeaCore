@@ -126,6 +126,17 @@ public interface ArenaManager {
     void endMatch(ArenaId id, @Nullable UUID winnerUuid);
 
     /**
+     * Ends the match with a team result: every member of {@code winningTeam}
+     * is a winner (core stats credit each of them), everyone else lost.
+     * Behaves like {@link #endMatch(ArenaId, UUID)} otherwise; the event's
+     * {@link MatchEndEvent#winner()} is a representative member of the team.
+     *
+     * @param id          arena id whose match is ending; unknown ids are no-ops.
+     * @param winningTeam the winning team, or {@code null} for a draw or no winner.
+     */
+    void endMatchForTeam(ArenaId id, @Nullable me.playbosswar.tea.core.api.team.TeamId winningTeam);
+
+    /**
      * Teleports an admin into an arena as a free-moving observer.
      *
      * <p>The observer is not tracked in the arena's participant or spectator sets and is not
