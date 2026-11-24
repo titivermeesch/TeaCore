@@ -80,8 +80,15 @@ public final class DashboardApi {
         app.delete("/api/maps/{gameId}/{mapId}", auth.guard(DashboardPermission.MAPS_DELETE, this::deleteMap));
         app.get("/api/maps/{gameId}/{mapId}/versions", this::mapVersions);
         app.post("/api/maps/{gameId}/{mapId}/restore", auth.guard(DashboardPermission.MAPS_RESTORE, this::restoreMap));
+        app.get("/api/maps/{gameId}/{mapId}/download", auth.guard(DashboardPermission.MAPS_TRANSFER, this::downloadMap));
+        app.get("/api/maps-export", auth.guard(DashboardPermission.MAPS_TRANSFER, this::exportMaps));
+        app.post("/api/maps-upload", auth.guard(DashboardPermission.MAPS_TRANSFER, this::uploadMaps));
         new DashboardLiveApi(plugin, auth, events, this).register(app);
         new DashboardHistoryApi(plugin, auth).register(app);
+        DashboardServersApi servers = new DashboardServersApi(core.coordination(), auth);
+        servers.register(app);
+        new DashboardChartsApi(plugin, core.database().dataSource(), core.coordination(), auth,
+                servers::onlinePlayers, plugin.getLogger()).register(app);
         if (plugin.settingsService() != null) {
             new DashboardSettingsApi(plugin.settingsService(), auth).register(app);
         }
@@ -125,14 +132,17 @@ public final class DashboardApi {
     }
 
     private GameSummaryDto toDto(GameDefinition def) {
-        String selection = switch (def.mapSelection()) {
-            case MapSelectionPolicy.Random ignored -> "random";
-            case MapSelectionPolicy.Fixed fixed -> "fixed:" + fixed.mapId();
-        };
+        String selection = def.mapSelection() instanceof MapSelectionPolicy.Fixed fixed
+                ? "fixed:" + fixed.mapId() : "random";
         int mapCount = core.maps().forGame(def.id()).size();
+        String key = def.displayNameKey();
+        String name = core.messageService().hasKey(key)
+                ? core.messageService().renderPlainText(plugin.getConfig().getString("i18n.default-locale", "en_US"), key,
+                        Map.of())
+                : def.id().value();
         return new GameSummaryDto(
                 def.id().value(),
-                def.displayNameKey(),
+                name,
                 def.teamMode().name(),
                 def.pool().minAvailable(),
                 def.pool().maxTotal(),
@@ -455,6 +465,53 @@ public final class DashboardApi {
         }
         auth.audit(ctx, "reload maps on " + targets);
         ctx.json(Map.of("ok", true, "targets", targets));
+    }
+
+    private void downloadMap(Context ctx) {
+        String game = ctx.pathParam("gameId");
+        String map = ctx.pathParam("mapId");
+        try {
+            sendZip(ctx, plugin.mapTransfer().exportMap(new GameId(game), map), game + "-" + map + ".zip");
+        } catch (java.io.IOException e) {
+            ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", String.valueOf(e.getMessage())));
+        }
+    }
+
+    private void exportMaps(Context ctx) {
+        try {
+            sendZip(ctx, plugin.mapTransfer().exportAll(), "tea-maps.zip");
+        } catch (java.io.IOException e) {
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", String.valueOf(e.getMessage())));
+        }
+    }
+
+    private static void sendZip(Context ctx, byte[] zip, String name) {
+        ctx.contentType("application/zip");
+        ctx.header("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9_.-]", "_") + "\"");
+        ctx.result(zip);
+    }
+
+    private void uploadMaps(Context ctx) {
+        byte[] zip = ctx.bodyAsBytes();
+        if (zip.length == 0) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "empty upload"));
+            return;
+        }
+        var session = DashboardAuth.session(ctx);
+        String actor = (session == null ? "?" : session.name()) + " (dashboard)";
+        try {
+            var result = MainThread.runSync(plugin, () -> {
+                try {
+                    return plugin.importMaps(zip, actor);
+                } catch (java.io.IOException e) {
+                    throw new IllegalArgumentException(e.getMessage(), e);
+                }
+            }, 60_000L);
+            auth.audit(ctx, "uploaded maps " + result.maps() + " and waiting rooms " + result.rooms());
+            ctx.json(Map.of("ok", true, "maps", result.maps(), "rooms", result.rooms()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", String.valueOf(e.getMessage())));
+        }
     }
 
     private void deleteMap(Context ctx) {

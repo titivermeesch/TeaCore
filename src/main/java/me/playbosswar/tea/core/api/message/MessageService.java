@@ -15,6 +15,14 @@ import org.bukkit.entity.Player;
 public interface MessageService {
 
     /**
+     * A key starting with this is not looked up: the rest is the MiniMessage text
+     * itself, the same in every language. Use it for names staff type in, such
+     * as {@code literal:<gold>Archer} for a kit added from the settings menu.
+     */
+    String LITERAL_PREFIX = "literal:";
+
+
+    /**
      * Sends a message in the player's locale, falling back to the default locale.
      * The theme prefix is applied.
      */

@@ -97,7 +97,7 @@ public final class ControlExecutor {
                             + " skipped: no maps authored on this backend.");
                     return;
                 }
-                arenas.allocate(gameId, cmd.mapId());
+                ((me.playbosswar.tea.core.impl.arena.ArenaManagerImpl) arenas).allocateSoon(gameId, cmd.mapId());
             }
             case RELOAD_MAPS -> plugin.reloadMaps();
             case RESTORE_MAP -> {

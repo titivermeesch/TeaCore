@@ -59,12 +59,14 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
+    // Compiles for Java 17; some compile-only APIs (WorldEdit 7.3) declare Java 21.
+    disableAutoTargetJvm()
     withSourcesJar()
 }
 
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
-    options.release.set(21)
+    options.release.set(17)
     options.compilerArgs.addAll(listOf("-Xmaxerrs", "2000"))
 }
 
@@ -159,7 +161,7 @@ val modernCheck by tasks.registering(JavaCompile::class) {
     classpath = shared + configurations["compileClasspath"].filter { !it.name.let { n -> n.startsWith("spigot-api-1.8.8") } } +
         configurations.detachedConfiguration(dependencies.create(modernApiDep))
     destinationDirectory.set(layout.buildDirectory.dir("modern-check"))
-    options.release.set(21)
+    options.release.set(17)
     options.encoding = "UTF-8"
     options.compilerArgs.addAll(listOf("-Xmaxerrs", "2000"))
 }

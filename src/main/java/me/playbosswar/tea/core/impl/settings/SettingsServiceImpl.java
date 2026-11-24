@@ -75,16 +75,22 @@ public final class SettingsServiceImpl implements SettingsService {
 
     private record Remote(SettingsSchema schema, String plugin, Map<String, Object> values, long at) { }
 
+    private record RemoteServer(String group, Map<String, Remote> files) { }
+
     private final Plugin plugin;
     private final CoordinationBackend coordination;
     private final Logger logger;
     private final ObjectMapper json = new ObjectMapper();
     private final Map<String, Local> local = new ConcurrentHashMap<>();
-    private final Map<String, Map<String, Remote>> remote = new ConcurrentHashMap<>();
+    private final Map<String, RemoteServer> remote = new ConcurrentHashMap<>();
+    private final java.util.function.Supplier<String> group;
     private volatile boolean publishPending;
     private volatile @Nullable SettingsStore store;
 
-    public SettingsServiceImpl(Plugin plugin, CoordinationBackend coordination, Logger logger) {
+    /** @param group this server's group (network.group) */
+    public SettingsServiceImpl(Plugin plugin, CoordinationBackend coordination, Logger logger,
+                               java.util.function.Supplier<String> group) {
+        this.group = group;
         this.plugin = plugin;
         this.coordination = coordination;
         this.logger = logger;
@@ -128,15 +134,37 @@ public final class SettingsServiceImpl implements SettingsService {
     // ------------------------------------------------------------------ reading
 
     public Map<String, FileView> views() {
+        return views(null);
+    }
+
+    /** Every server group that reported settings, this server's included. */
+    public Set<String> groups() {
+        Set<String> out = new java.util.TreeSet<>();
+        out.add(group.get());
+        long now = System.currentTimeMillis();
+        for (RemoteServer r : remote.values()) {
+            if (r.files.values().stream().anyMatch(f -> now - f.at <= REMOTE_TTL_MS)) {
+                out.add(r.group);
+            }
+        }
+        return out;
+    }
+
+    /** @param onlyGroup only servers of this group, or every server when {@code null} */
+    public Map<String, FileView> views(@Nullable String onlyGroup) {
         Map<String, FileView> views = new LinkedHashMap<>();
         String self = coordination.serverId();
-        for (Local l : local.values()) {
+        boolean includeLocal = onlyGroup == null || onlyGroup.equals(group.get());
+        for (Local l : includeLocal ? local.values() : List.<Local>of()) {
             List<String> hosts = new ArrayList<>(List.of(self));
             views.put(l.schema.id(), new FileView(l.schema, l.owner.getName(), hosts, valuesOf(l), new LinkedHashSet<>()));
         }
         long now = System.currentTimeMillis();
-        for (Map.Entry<String, Map<String, Remote>> server : remote.entrySet()) {
-            for (Map.Entry<String, Remote> e : server.getValue().entrySet()) {
+        for (Map.Entry<String, RemoteServer> server : remote.entrySet()) {
+            if (onlyGroup != null && !onlyGroup.equals(server.getValue().group)) {
+                continue;
+            }
+            for (Map.Entry<String, Remote> e : server.getValue().files.entrySet()) {
                 Remote r = e.getValue();
                 if (now - r.at > REMOTE_TTL_MS) {
                     continue;
@@ -167,6 +195,10 @@ public final class SettingsServiceImpl implements SettingsService {
 
     public @Nullable FileView view(String fileId) {
         return views().get(fileId);
+    }
+
+    public @Nullable FileView view(String fileId, @Nullable String onlyGroup) {
+        return views(onlyGroup).get(fileId);
     }
 
     private Map<String, Object> valuesOf(Local l) {
@@ -202,21 +234,37 @@ public final class SettingsServiceImpl implements SettingsService {
      * @return the servers the change went to
      * @throws IllegalArgumentException with a message for staff when a change doesn't fit the schema
      */
-    public List<String> apply(String fileId, List<Change> changes, String actor, @Nullable String server) {
-        FileView view = view(fileId);
+    public List<String> apply(String fileId, List<Change> changes, String actor, @Nullable String onlyGroup) {
+        return apply(fileId, changes, actor, onlyGroup, null);
+    }
+
+    /**
+     * @param onlyGroup apply to and store for this server group only; {@code null} for every server
+     * @param reverts   the history entry this change undoes, if any
+     */
+    public List<String> apply(String fileId, List<Change> changes, String actor, @Nullable String onlyGroup,
+                              @Nullable String reverts) {
+        FileView view = view(fileId, onlyGroup);
         if (view == null) {
-            throw new IllegalArgumentException("Unknown settings file " + fileId);
+            throw new IllegalArgumentException(onlyGroup == null ? "Unknown settings file " + fileId
+                    : "No " + onlyGroup + " server has " + fileId);
         }
         List<Change> writes = toWrites(view, changes);
         if (writes.isEmpty()) {
             return List.of();
         }
-        SettingsStore s = store;
-        if (s != null && server == null) {
-            Bukkit.getScheduler().runTaskAsynchronously(plugin,
-                    () -> s.record(fileId, view.plugin(), view.schema().file(), writes, actor));
+        Map<String, Object> doc = view.document();
+        Map<String, Object> before = new LinkedHashMap<>();
+        for (Change w : writes) {
+            before.put(w.path(), SettingsValues.deepCopy(SettingsValues.get(doc, w.path())));
         }
-        List<String> targets = server != null ? List.of(server) : List.copyOf(view.hosts());
+        SettingsStore s = store;
+        if (s != null) {
+            String scope = onlyGroup == null ? "" : onlyGroup;
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> s.record(fileId, scope, view.plugin(),
+                    view.schema().file(), writes, before, actor, reverts));
+        }
+        List<String> targets = List.copyOf(view.hosts());
         String self = coordination.serverId();
         String payload;
         try {
@@ -244,6 +292,33 @@ public final class SettingsServiceImpl implements SettingsService {
             }
         }
         return targets;
+    }
+
+    public @Nullable SettingsStore store() {
+        return store;
+    }
+
+    /**
+     * Puts back the value from before a history entry, for the same servers.
+     *
+     * @throws IllegalArgumentException when there is nothing to go back to
+     */
+    public List<String> revert(String historyId, String actor) {
+        SettingsStore s = store;
+        SettingsStore.Entry e = s == null ? null : s.entry(historyId).orElse(null);
+        if (e == null) {
+            throw new IllegalArgumentException("Unknown change " + historyId);
+        }
+        if (e.revertedBy() != null) {
+            throw new IllegalArgumentException("That change was already undone");
+        }
+        FileView v = view(e.fileId(), e.scope().isEmpty() ? null : e.scope());
+        if (e.oldValue() == null && v != null && v.schema().resolve(e.path())
+                .map(r -> r.kind() == SettingsSchema.Kind.VALUE).orElse(true)) {
+            throw new IllegalArgumentException("That setting had no value before, so there is nothing to go back to");
+        }
+        return apply(e.fileId(), List.of(new Change(e.path(), e.oldValue())), actor,
+                e.scope().isEmpty() ? null : e.scope(), historyId);
     }
 
     /** Runs a change another server validated. */
@@ -374,7 +449,7 @@ public final class SettingsServiceImpl implements SettingsService {
             String payload = json.writeValueAsString(files);
             coordination.publishEvent(new CoordinationEvent(CoordinationEvent.Type.SETTINGS,
                     coordination.serverId(), null, null, null, null, null, null, null, null, null, 0, -1,
-                    Map.of("files", payload)));
+                    Map.of("files", payload, "group", group.get())));
         } catch (IOException | RuntimeException e) {
             logger.log(Level.FINE, "Could not publish settings", e);
         }
@@ -389,13 +464,14 @@ public final class SettingsServiceImpl implements SettingsService {
             List<Map<String, Object>> files = json.readValue(e.data().get("files"),
                     new TypeReference<List<Map<String, Object>>>() { });
             Map<String, Remote> byId = new ConcurrentHashMap<>();
+            String serverGroup = e.data().getOrDefault("group", "arena");
             long now = System.currentTimeMillis();
             for (Map<String, Object> f : files) {
                 SettingsSchema schema = SettingsSchema.parse(SettingsSchema.map(f.get("schema")));
                 byId.put(schema.id(), new Remote(schema, String.valueOf(f.get("plugin")),
                         SettingsSchema.map(f.get("values")), now));
             }
-            remote.put(e.serverId(), byId);
+            remote.put(e.serverId(), new RemoteServer(serverGroup, byId));
         } catch (IOException | RuntimeException ex) {
             logger.log(Level.FINE, "Ignoring settings from " + e.serverId(), ex);
         }

@@ -354,7 +354,7 @@ public record SettingsSchema(String id, String title, String file, String icon, 
         return o instanceof Map<?, ?> m ? copy(m) : Map.of();
     }
 
-    static Map<String, Object> copy(Map<?, ?> m) {
+    public static Map<String, Object> copy(Map<?, ?> m) {
         Map<String, Object> out = new LinkedHashMap<>();
         for (Map.Entry<?, ?> e : m.entrySet()) {
             out.put(String.valueOf(e.getKey()), e.getValue());

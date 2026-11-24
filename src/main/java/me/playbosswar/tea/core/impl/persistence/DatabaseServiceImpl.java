@@ -35,7 +35,7 @@ public final class DatabaseServiceImpl implements DatabaseService, AutoCloseable
             }
             case MYSQL -> {
                 hc.setJdbcUrl("jdbc:mysql://" + config.mysqlHost() + ":" + config.mysqlPort()
-                        + "/" + config.mysqlDatabase() + "?useSSL=false&serverTimezone=UTC");
+                        + "/" + config.mysqlDatabase() + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
                 hc.setDriverClassName(com.mysql.cj.jdbc.Driver.class.getName());
                 hc.setUsername(config.mysqlUser());
                 hc.setPassword(config.mysqlPassword());

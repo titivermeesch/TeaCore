@@ -31,11 +31,15 @@ final class DashboardSettingsApi {
     void register(Javalin app) {
         app.get("/api/settings", auth.guard(DashboardPermission.SETTINGS, this::list));
         app.post("/api/settings/{fileId}", auth.guard(DashboardPermission.SETTINGS, this::save));
+        app.get("/api/settings-history", auth.guard(DashboardPermission.SETTINGS, this::history));
+        app.post("/api/settings-history/{id}/revert", auth.guard(DashboardPermission.SETTINGS, this::revert));
+        app.get("/api/settings-groups", auth.guard(DashboardPermission.SETTINGS, ctx -> ctx.json(settings.groups())));
     }
 
     private void list(Context ctx) {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (FileView v : settings.views().values()) {
+        String group = ctx.queryParam("group");
+        for (FileView v : settings.views(group == null || group.isBlank() ? null : group).values()) {
             Map<String, Object> values = new LinkedHashMap<>(v.values());
             for (SettingsSchema.Field f : v.schema().fields()) {
                 if (f.secret()) {
@@ -53,6 +57,57 @@ final class DashboardSettingsApi {
             out.add(file);
         }
         ctx.json(out);
+    }
+
+    private void history(Context ctx) {
+        var store = settings.store();
+        if (store == null) {
+            ctx.json(List.of());
+            return;
+        }
+        String file = ctx.queryParam("file");
+        int limit = 100;
+        try {
+            limit = Integer.parseInt(ctx.queryParamAsClass("limit", String.class).getOrDefault("100"));
+        } catch (NumberFormatException ignored) {
+            // keep the default
+        }
+        java.util.Set<String> secret = new java.util.HashSet<>();
+        for (FileView v : settings.views().values()) {
+            for (SettingsSchema.Field f : v.schema().fields()) {
+                if (f.secret()) {
+                    secret.add(v.schema().id() + "|" + f.path());
+                }
+            }
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (var e : store.history(file == null || file.isBlank() ? null : file, limit)) {
+            boolean hide = secret.contains(e.fileId() + "|" + e.path());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", e.id());
+            m.put("file", e.fileId());
+            m.put("group", e.scope());
+            m.put("path", e.path());
+            m.put("oldValue", hide ? (e.oldValue() == null ? null : HIDDEN) : e.oldValue());
+            m.put("newValue", hide ? (e.newValue() == null ? null : HIDDEN) : e.newValue());
+            m.put("at", e.at());
+            m.put("actor", e.actor());
+            m.put("revertedBy", e.revertedBy());
+            out.add(m);
+        }
+        ctx.json(out);
+    }
+
+    private void revert(Context ctx) {
+        DashboardSessions.Session session = DashboardAuth.session(ctx);
+        String actor = (session == null ? "?" : session.name()) + " (dashboard)";
+        try {
+            List<String> targets = settings.revert(ctx.pathParam("id"), actor);
+            auth.audit(ctx, "undid settings change " + ctx.pathParam("id") + " on " + targets);
+            ctx.json(Map.of("ok", true, "targets", targets));
+        } catch (IllegalArgumentException e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", String.valueOf(e.getMessage())));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -79,10 +134,10 @@ final class DashboardSettingsApi {
         }
         DashboardSessions.Session session = DashboardAuth.session(ctx);
         String actor = (session == null ? "?" : session.name()) + " (dashboard)";
-        Object server = body.get("server");
+        Object group = body.get("group");
         try {
             List<String> targets = settings.apply(fileId, changes, actor,
-                    server instanceof String s && !s.isBlank() ? s : null);
+                    group instanceof String s && !s.isBlank() ? s : null);
             List<String> paths = changes.stream().map(Change::path).toList();
             auth.audit(ctx, "changed settings " + fileId + " " + paths + " on " + targets);
             ctx.json(Map.of("ok", true, "targets", targets));

@@ -38,16 +38,20 @@ export default function MatchPage() {
                         <CardHeader><CardTitle>Players</CardTitle></CardHeader>
                         <CardContent className="px-0 pt-0">
                             <Table>
-                                <Thead><Tr><Th>Player</Th><Th>Team</Th><Th>Result</Th><Th>K</Th><Th>D</Th><Th>A</Th></Tr></Thead>
+                                <Thead><Tr><Th>Player</Th><Th>Team</Th><Th>Result</Th><Th>K</Th><Th>D</Th><Th>A</Th><Th>Damage</Th></Tr></Thead>
                                 <Tbody>
                                     {m.players.map((p, i) => (
                                         <Tr key={p.uuid ?? i}>
-                                            <Td>{p.uuid ? <Link to={`/players/${p.uuid}`} className="hover:underline">{p.name ?? p.uuid.slice(0, 8)}</Link> : p.name}</Td>
+                                            <Td>
+                                                {p.uuid ? <Link to={`/players/${p.uuid}`} className="hover:underline">{p.name ?? p.uuid.slice(0, 8)}</Link> : p.name}
+                                                {p.uuid && p.uuid === m.mvpUuid && <Badge className="ml-2">MVP</Badge>}
+                                            </Td>
                                             <Td className="capitalize">{p.team ?? '-'}</Td>
                                             <Td><Badge variant={p.result === 'win' ? 'success' : p.result === 'loss' ? 'error' : 'muted'}>{p.result}</Badge></Td>
                                             <Td className="tabular-nums">{p.kills}</Td>
                                             <Td className="tabular-nums">{p.deaths}</Td>
                                             <Td className="tabular-nums">{p.assists}</Td>
+                                            <Td className="tabular-nums">{p.damage == null ? '-' : Math.round(p.damage / 2)} <span className="text-muted text-xs">hearts</span></Td>
                                         </Tr>
                                     ))}
                                 </Tbody>

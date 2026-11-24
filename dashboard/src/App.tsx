@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { Route, Routes, NavLink, Navigate, useLocation } from 'react-router-dom';
 import {
     Activity,
+    LineChart,
     Gamepad2,
     History as HistoryIcon,
     KeyRound,
     LayoutDashboard,
     LogOut,
     Menu,
+    Server as ServerIcon,
     Settings as SettingsIcon,
     Swords,
     Trophy,
@@ -25,6 +27,8 @@ import MatchPage from './pages/Match';
 import Sessions from './pages/Sessions';
 import Leaderboard from './pages/Leaderboard';
 import Settings from './pages/Settings';
+import Servers from './pages/Servers';
+import ActivityPage from './pages/Activity';
 import { api, apiPost, UNAUTHORIZED_EVENT } from './api';
 import { Me, MeProvider, P, useCan, useMe } from './auth';
 import { DashboardWsProvider, useDashboardWs } from './ws';
@@ -97,6 +101,8 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
                 </div>
                 <nav className="flex flex-col text-sm gap-0.5">
                     <NavItem to="/" icon={<LayoutDashboard className="h-4 w-4" />}>Overview</NavItem>
+                    <NavItem to="/activity" icon={<LineChart className="h-4 w-4" />}>Activity</NavItem>
+                    <NavItem to="/servers" icon={<ServerIcon className="h-4 w-4" />}>Servers</NavItem>
                     <NavItem to="/games" icon={<Gamepad2 className="h-4 w-4" />}>Games</NavItem>
                     <NavItem to="/arenas" icon={<Swords className="h-4 w-4" />}>Arenas</NavItem>
                     <NavItem to="/queues" icon={<Activity className="h-4 w-4" />}>Queues</NavItem>
@@ -126,6 +132,8 @@ function Shell({ onSignOut }: { onSignOut: () => void }) {
             <main className="flex-1 min-w-0 p-4 md:p-6 overflow-auto">
                 <Routes>
                     <Route path="/" element={<Overview />} />
+                    <Route path="/activity" element={<ActivityPage />} />
+                    <Route path="/servers" element={<Servers />} />
                     <Route path="/games" element={<Games />} />
                     <Route path="/arenas" element={<Arenas />} />
                     <Route path="/arenas/:id" element={<ArenaDetailPage />} />

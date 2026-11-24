@@ -21,16 +21,19 @@ final class MainThread {
     }
 
     static <T> T runSync(Plugin plugin, Callable<T> task) {
+        return runSync(plugin, task, DEFAULT_TIMEOUT_MILLIS);
+    }
+
+    static <T> T runSync(Plugin plugin, Callable<T> task, long timeoutMillis) {
         Future<T> future = Bukkit.getScheduler().callSyncMethod(plugin, task);
         try {
-            return future.get(DEFAULT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            return future.get(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted while waiting on main-thread task", e);
         } catch (TimeoutException e) {
             future.cancel(true);
-            throw new RuntimeException("Main-thread task timed out after "
-                    + DEFAULT_TIMEOUT_MILLIS + "ms", e);
+            throw new RuntimeException("Main-thread task timed out after " + timeoutMillis + "ms", e);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException re) throw re;

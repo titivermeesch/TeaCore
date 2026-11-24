@@ -14,18 +14,22 @@ import org.jetbrains.annotations.Nullable;
  */
 public interface MatchHistoryService {
 
-    /** One finished match. {@code winnerTeam}/{@code winnerUuid} are null for a draw. */
+    /**
+     * One finished match. {@code winnerTeam}/{@code winnerUuid} are null for a
+     * draw; {@code mvpUuid} is null when nobody got a kill.
+     */
     record MatchRecord(UUID matchId, String gameId, @Nullable String mapId, @Nullable String serverId,
                        Instant endedAt, int durationSeconds, @Nullable String winnerTeam,
-                       @Nullable UUID winnerUuid) { }
+                       @Nullable UUID winnerUuid, @Nullable UUID mvpUuid) { }
 
     /**
      * {@code result} is {@code win}, {@code loss}, {@code draw} or {@code left}
      * (left before the end). {@code name} is the name at the time, and may be
-     * {@code null} for old records.
+     * {@code null} for old records. {@code damage} is damage dealt to players,
+     * 0 for old records.
      */
     record PlayerMatch(MatchRecord match, @Nullable String team, int kills, int deaths, int assists,
-                       String result, @Nullable UUID uuid, @Nullable String name) { }
+                       String result, @Nullable UUID uuid, @Nullable String name, int damage) { }
 
     /**
      * Filters for {@link #search}. A {@code null} field matches anything.

@@ -198,7 +198,7 @@ public final class Matchmaker implements Listener {
             plugin.getLogger().info("[mm]   routing " + player.getName()
                     + " to REMOTE server '" + snapshot.serverId() + "' (arena "
                     + snapshot.arenaId().value().toString().substring(0, 8)
-                    + ") via BungeeCord:Connect");
+                    + ") through the proxy");
             // Marked before sending Connect because PlayerQuitEvent follows shortly and the
             // disconnect listener checks this map. The destination server dequeues on join.
             recentlyRouted.put(player.getUniqueId(), Instant.now());

@@ -14,12 +14,18 @@ public final class ServerStatsPublisher {
     private final Plugin plugin;
     private final CoordinationBackend backend;
     private final IntSupplier spareWorlds;
+    private java.util.function.Supplier<Map<String, String>> details = Map::of;
     private BukkitTask task;
 
     public ServerStatsPublisher(Plugin plugin, CoordinationBackend backend, IntSupplier spareWorlds) {
         this.plugin = plugin;
         this.backend = backend;
         this.spareWorlds = spareWorlds;
+    }
+
+    /** More facts for the dashboard's server list, such as what the server hosts. */
+    public void setDetails(java.util.function.Supplier<Map<String, String>> details) {
+        this.details = details;
     }
 
     public void start() {
@@ -88,6 +94,11 @@ public final class ServerStatsPublisher {
         data.put("memoryUsed", String.valueOf(rt.totalMemory() - rt.freeMemory()));
         data.put("memoryMax", String.valueOf(rt.maxMemory()));
         data.put("spareWorlds", String.valueOf(spareWorlds.getAsInt()));
+        try {
+            data.putAll(details.get());
+        } catch (RuntimeException ignored) {
+            // details are optional
+        }
         int players = Bukkit.getOnlinePlayers().size();
         try {
             backend.publishEvent(new CoordinationEvent(CoordinationEvent.Type.SERVER_STATS, backend.serverId(),

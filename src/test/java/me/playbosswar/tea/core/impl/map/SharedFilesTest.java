@@ -46,7 +46,7 @@ class SharedFilesTest {
     private SharedFiles server(String name) throws Exception {
         Path folder = tmp.resolve(name);
         Files.createDirectories(folder);
-        return new SharedFiles(db, folder, name, logger);
+        return new SharedFiles(db, folder, List.of("maps", "waiting-rooms", "theme.yml"), name, logger);
     }
 
     private void write(String server, String path, String text) throws Exception {
@@ -70,10 +70,10 @@ class SharedFilesTest {
         byte[] big = new byte[3 * 1024 * 1024 + 17];
         new Random(1).nextBytes(big);
         write("lobby", "maps/schems/big.schem", big);
-        lobby.pullAtStartup();
+        lobby.pull();
 
         SharedFiles arena = server("arena");
-        assertThat(arena.pullAtStartup()).containsExactlyInAnyOrder("maps/fireball.yml", "maps/schems/big.schem");
+        assertThat(arena.pull()).containsExactlyInAnyOrder("maps/fireball.yml", "maps/schems/big.schem");
         assertThat(read("arena", "maps/fireball.yml")).isEqualTo("maps: {}\n");
         assertThat(Files.readAllBytes(tmp.resolve("arena/maps/schems/big.schem"))).isEqualTo(big);
     }
@@ -83,9 +83,9 @@ class SharedFilesTest {
         SharedFiles a = server("a");
         write("a", "maps/fireball.yml", "v1\n");
         write("a", "waiting-rooms/waiting-rooms.yml", "rooms: {}\n");
-        a.pullAtStartup();
+        a.pull();
         SharedFiles b = server("b");
-        b.pullAtStartup();
+        b.pull();
 
         write("a", "maps/fireball.yml", "v2\n");
         Files.delete(tmp.resolve("a/waiting-rooms/waiting-rooms.yml"));
@@ -102,9 +102,9 @@ class SharedFilesTest {
         SharedFiles a = server("a");
         write("a", "maps/fireball.yml", "fb1\n");
         write("a", "maps/ascend.yml", "as1\n");
-        a.pullAtStartup();
+        a.pull();
         SharedFiles b = server("b");
-        b.pullAtStartup();
+        b.pull();
 
         write("a", "maps/fireball.yml", "fb2\n");
         write("b", "maps/ascend.yml", "as2\n");
@@ -120,25 +120,51 @@ class SharedFilesTest {
     }
 
     @Test
-    void bakedInFilesAreSetAsideOnlyAtStartup() throws Exception {
+    void filesCopiedInByHandAreUploadedAndTheDatabaseWinsForTheRest() throws Exception {
         SharedFiles a = server("a");
-        write("a", "maps/fireball.yml", "shared\n");
-        a.pullAtStartup();
-
-        write("b", "maps/old.yml", "from the image\n");
-        SharedFiles b = server("b");
-        b.pullAtStartup();
-        assertThat(tmp.resolve("b/maps/old.yml")).doesNotExist();
-        try (var walk = Files.walk(tmp.resolve("b/replaced-by-database"))) {
-            assertThat(walk.anyMatch(p -> p.endsWith("old.yml"))).isTrue();
-        }
-
-        write("b", "maps/new.yml", "saved here\n");
-        b.pull();
-        assertThat(tmp.resolve("b/maps/new.yml")).exists();
-        assertThat(b.push()).isTrue();
+        write("a", "maps/fireball.yml", "shared v2\n");
         a.pull();
-        assertThat(read("a", "maps/new.yml")).isEqualTo("saved here\n");
+
+        write("b", "maps/fireball.yml", "stale copy from the image\n");
+        write("b", "maps/overcharge.yml", "copied in by hand\n");
+        SharedFiles b = server("b");
+        b.pull();
+        assertThat(read("b", "maps/fireball.yml")).isEqualTo("shared v2\n");
+        assertThat(read("b", "maps/overcharge.yml")).isEqualTo("copied in by hand\n");
+        assertThat(b.push()).isTrue();
+
+        a.pull();
+        assertThat(read("a", "maps/overcharge.yml")).isEqualTo("copied in by hand\n");
+    }
+
+    @Test
+    void aFileEditedWhileTheServerWasOffIsKeptAndUploaded() throws Exception {
+        write("a", "maps/fireball.yml", "v1\n");
+        server("a").pull();
+        SharedFiles b = server("b");
+        b.pull();
+        assertThat(read("b", "maps/fireball.yml")).isEqualTo("v1\n");
+
+        write("a", "maps/fireball.yml", "edited by hand\n");
+        SharedFiles restarted = server("a");
+        restarted.pull();
+        assertThat(read("a", "maps/fireball.yml")).isEqualTo("edited by hand\n");
+        assertThat(restarted.push()).isTrue();
+
+        b.pull();
+        assertThat(read("b", "maps/fireball.yml")).isEqualTo("edited by hand\n");
+    }
+
+    @Test
+    void singleFilesAreSharedAndOtherFilesAreLeftAlone() throws Exception {
+        SharedFiles a = server("a");
+        write("a", "theme.yml", "primary: red\n");
+        write("a", "config.yml", "not shared\n");
+        a.pull();
+        SharedFiles b = server("b");
+        b.pull();
+        assertThat(read("b", "theme.yml")).isEqualTo("primary: red\n");
+        assertThat(tmp.resolve("b/config.yml")).doesNotExist();
     }
 
     @Test

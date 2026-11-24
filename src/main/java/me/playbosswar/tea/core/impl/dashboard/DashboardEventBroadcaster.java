@@ -152,7 +152,7 @@ public final class DashboardEventBroadcaster {
                 }
                 requires = DashboardPermission.CHAT;
             }
-            case SERVER_STATS, SETTINGS, MAPS_CHANGED -> {
+            case SERVER_STATS, SETTINGS, FILES_CHANGED -> {
                 return;
             }
         }

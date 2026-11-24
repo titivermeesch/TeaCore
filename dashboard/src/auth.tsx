@@ -26,6 +26,7 @@ export const P = {
     mapsRestore: 'tea.dashboard.maps.restore',
     sessions: 'tea.dashboard.sessions',
     settings: 'tea.dashboard.settings',
+    mapsTransfer: 'tea.dashboard.maps.transfer',
 } as const;
 
 const MeCtx = createContext<Me | null>(null);

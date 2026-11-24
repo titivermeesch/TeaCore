@@ -48,6 +48,7 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
     private final Map<UUID, Map<UUID, Long>> hits = new ConcurrentHashMap<>();
     /** arena -> player -> {kills, deaths, assists} for the current match. */
     private final Map<ArenaId, Map<UUID, int[]>> matchStats = new ConcurrentHashMap<>();
+    private final Map<ArenaId, Map<UUID, Double>> damage = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastReported = new ConcurrentHashMap<>();
 
     /** Windows are read from {@code combat.*} on every use, so reloads apply. */
@@ -116,6 +117,24 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         return line == null ? MatchStats.ZERO : new MatchStats(line[0], line[1], line[2]);
     }
 
+    private volatile java.util.function.Function<UUID, String> killMessages;
+
+    @Override
+    public void setKillMessageProvider(java.util.function.Function<UUID, String> provider) {
+        this.killMessages = provider;
+    }
+
+    @Override
+    public Optional<String> customKillMessage(UUID killer) {
+        var provider = killMessages;
+        return provider == null ? Optional.empty() : Optional.ofNullable(provider.apply(killer));
+    }
+
+    @Override
+    public double damageDealt(ArenaId arena, UUID player) {
+        return damage.getOrDefault(arena, Map.of()).getOrDefault(player, 0.0);
+    }
+
     private void countMatch(ArenaId arena, KillCredit credit) {
         Map<UUID, int[]> perPlayer = matchStats.computeIfAbsent(arena, k -> new ConcurrentHashMap<>());
         perPlayer.computeIfAbsent(credit.victim(), k -> new int[3])[1]++;
@@ -158,8 +177,18 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         if (attacker == null) {
             return;
         }
-        arenas.arenaOf(victim.getUniqueId()).ifPresent(arena ->
-                recordHit(arena, victim.getUniqueId(), attacker.getUniqueId()));
+        arenas.arenaOf(victim.getUniqueId()).ifPresent(arena -> {
+            recordHit(arena, victim.getUniqueId(), attacker.getUniqueId());
+            if (arena.state() == ArenaState.LIVE && !attacker.getUniqueId().equals(victim.getUniqueId())
+                    && arena.players().contains(attacker.getUniqueId())
+                    && !sameTeam(arena, victim.getUniqueId(), attacker.getUniqueId())) {
+                double dealt = Math.min(event.getFinalDamage(), victim.getHealth());
+                if (dealt > 0) {
+                    damage.computeIfAbsent(arena.id(), k -> new ConcurrentHashMap<>())
+                            .merge(attacker.getUniqueId(), dealt, Double::sum);
+                }
+            }
+        });
     }
 
     /** Real deaths in a live arena are reported unless the game already did. */
@@ -200,6 +229,7 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         if (event.to() == ArenaState.RESETTING || event.to() == ArenaState.RELEASED
                 || event.to() == ArenaState.STARTING) {
             matchStats.remove(event.arena().id());
+            damage.remove(event.arena().id());
         }
     }
 

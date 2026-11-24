@@ -114,7 +114,10 @@ public final class CloudIntegration {
 
     private void scaleTick() {
         ConfigurationSection games = cfg().getConfigurationSection("games");
-        if (games == null || !coordination.tryAcquireMatchmakerLock()) {
+        // Only matchmaker candidates may take the lock: a game service holding it
+        // would stop the lobby from opening arenas and routing players.
+        if (games == null || !plugin.getConfig().getBoolean("network.eligible-matchmaker", true)
+                || !coordination.tryAcquireMatchmakerLock()) {
             return;
         }
         for (String game : games.getKeys(false)) {

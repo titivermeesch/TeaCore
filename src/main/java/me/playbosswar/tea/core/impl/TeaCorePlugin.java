@@ -94,7 +94,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             "V010__achievement_definitions.sql",
             "V011__ratings.sql",
             "V012__quests.sql",
-            "V013__shared_files.sql");
+            "V013__shared_files.sql",
+            "V014__match_recap.sql",
+            "V015__dashboard_samples.sql");
 
     public static final ErrorTracker ERROR_TRACKER = ErrorTracker.contextAware();
 
@@ -212,16 +214,23 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
             this.databaseService = new DatabaseServiceImpl(config.database(), getLogger());
             this.databaseService.registerMigrations(this, "core", CORE_MIGRATIONS);
-            if (!"files".equalsIgnoreCase(getConfig().getString("maps.storage", "database"))) {
-                this.sharedFiles = new me.playbosswar.tea.core.impl.map.SharedFiles(
-                        databaseService.dataSource(), getDataFolder().toPath(), serverId(), getLogger());
-                sharedFiles.pullAtStartup();
+            List<String> sharedRoots = sharedRoots();
+            if (!sharedRoots.isEmpty()) {
+                this.sharedFiles = new me.playbosswar.tea.core.impl.map.SharedFiles(databaseService.dataSource(),
+                        getDataFolder().getParentFile().toPath(), sharedRoots, serverId(), getLogger());
+                java.util.Set<String> pulled = sharedFiles.pull();
                 me.playbosswar.tea.core.impl.map.MapChanges.setListener(this::pushSharedFiles);
+                if (pulled.stream().anyMatch(p -> p.startsWith(getName() + "/lang/")
+                        || p.equals(getName() + "/theme.yml"))) {
+                    loadConfigAndTheme();
+                    messageService.replaceTheme(theme);
+                    messageService.replaceBundles(loadAllBundles());
+                }
             }
             this.settingsStore = new me.playbosswar.tea.core.impl.settings.SettingsStore(
                     databaseService.dataSource(), getLogger());
             // Before any game plugin is enabled, so they read the shared values.
-            settingsStore.applyToFiles();
+            settingsStore.applyToFiles(serverGroup());
             reloadConfig();
 
             this.playerProfileService = new PlayerProfileServiceImpl(databaseService.dataSource(), getLogger());
@@ -444,6 +453,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.coordinationBackend = createCoordinationBackend();
             this.serverStats = new me.playbosswar.tea.core.impl.metrics.ServerStatsPublisher(
                     this, coordinationBackend, arenaManager::spareCount);
+            serverStats.setDetails(this::serverDetails);
             serverStats.start();
             me.playbosswar.tea.core.impl.cloud.CloudPlatform cloud = getConfig().getBoolean("cloudnet.enabled", true)
                     ? me.playbosswar.tea.core.impl.cloud.CloudPlatform.detect(getLogger()) : null;
@@ -471,6 +481,8 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.ratings = new me.playbosswar.tea.core.impl.rating.RatingService(
                     this, this, databaseService.dataSource(), getLogger());
             getServer().getPluginManager().registerEvents(ratings, this);
+            getServer().getPluginManager().registerEvents(
+                    new me.playbosswar.tea.core.impl.recap.MatchRecap(this, this, ratings), this);
             heartbeater.setRatings(ratings);
             matchmaker.setRatings(ratings);
             registerLeaderboard();
@@ -488,11 +500,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 menuService.registerMenu(this, "menus/" + file + ".yml");
             }
             this.settingsService = new me.playbosswar.tea.core.impl.settings.SettingsServiceImpl(
-                    this, coordinationBackend, getLogger());
+                    this, coordinationBackend, getLogger(), this::serverGroup);
             settingsService.start();
             settingsService.setStore(settingsStore);
             if (sharedFiles != null) {
                 coordinationBackend.subscribeEvents(this::onSharedFilesEvent);
+                // Uploads maps copied into the folder while the server was off.
+                pushSharedFiles();
             }
             settingsService.register(this, "settings/teacore.yml", paths -> reload());
             settingsService.register(this, "settings/quests.yml", paths -> {
@@ -766,6 +780,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             sharedFiles.pull();
         }
         reloadMapsFromDisk();
+        pushSharedFiles();
     }
 
     private void reloadMapsFromDisk() {
@@ -972,27 +987,116 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
             if (files.push() && coordinationBackend != null) {
                 coordinationBackend.publishEvent(new me.playbosswar.tea.core.api.coordination.CoordinationEvent(
-                        me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.MAPS_CHANGED,
+                        me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.FILES_CHANGED,
                         coordinationBackend.serverId(), null, null, null, null, null, null, null, null, null,
                         0, -1, null));
             }
         });
     }
 
+    /**
+     * The folders and files shared through the database: maps and waiting rooms
+     * ({@code maps.storage}), and the menus, sidebars, theme and languages of
+     * TeaCore and every plugin built on it ({@code share-config-files}).
+     */
+    private List<String> sharedRoots() {
+        List<String> roots = new java.util.ArrayList<>();
+        String me = getDataFolder().getName();
+        if (!"files".equalsIgnoreCase(getConfig().getString("maps.storage", "database"))) {
+            roots.add(me + "/maps");
+            roots.add(me + "/waiting-rooms");
+        }
+        if (getConfig().getBoolean("share-config-files", true)) {
+            roots.addAll(List.of(me + "/menus", me + "/lang", me + "/theme.yml", me + "/sidebar.yml"));
+            for (org.bukkit.plugin.Plugin p : getServer().getPluginManager().getPlugins()) {
+                if (p != this && (p.getDescription().getDepend().contains(getName())
+                        || p.getDescription().getSoftDepend().contains(getName()))) {
+                    roots.add(p.getDataFolder().getName() + "/menus");
+                    roots.add(p.getDataFolder().getName() + "/lang");
+                }
+            }
+        }
+        return roots;
+    }
+
+    public me.playbosswar.tea.core.impl.map.MapTransfer mapTransfer() {
+        return new me.playbosswar.tea.core.impl.map.MapTransfer(getDataFolder().toPath());
+    }
+
+    /** Imports a map zip on the main thread, backing up maps it replaces, and shares the result. */
+    public me.playbosswar.tea.core.impl.map.MapTransfer.Imported importMaps(byte[] zip, String actor)
+            throws java.io.IOException {
+        var backups = mapEditingService == null ? null : mapEditingService.backups();
+        var result = mapTransfer().importZip(zip,
+                backups == null ? null : (game, map) -> backups.snapshot(game, map, actor, "upload"));
+        reloadMapsFromDisk();
+        if (arenaManager != null) {
+            arenaManager.waitingRooms().load();
+        }
+        me.playbosswar.tea.core.impl.map.MapChanges.changed();
+        getLogger().info(actor + " uploaded maps " + result.maps() + " and waiting rooms " + result.rooms());
+        return result;
+    }
+
+    /** What this server is, for the dashboard's server list. */
+    private java.util.Map<String, String> serverDetails() {
+        java.util.Map<String, String> d = new java.util.HashMap<>();
+        d.put("group", serverGroup());
+        d.put("lobby", String.valueOf(getConfig().getBoolean("lobby.enabled", false)));
+        d.put("poolMode", config.arenaPool().mode().name().toLowerCase(java.util.Locale.ROOT));
+        d.put("teacore", getDescription().getVersion());
+        d.put("minecraft", getServer().getBukkitVersion().split("-")[0]);
+        d.put("software", getServer().getName());
+        if (gameRegistry != null) {
+            java.util.List<String> installed = new java.util.ArrayList<>();
+            java.util.List<String> hosted = new java.util.ArrayList<>();
+            java.util.List<String> mapModes = new java.util.ArrayList<>();
+            for (var def : gameRegistry.all()) {
+                installed.add(def.id().value());
+                if (hosting == null || hosting.hosts(def.id())) {
+                    hosted.add(def.id().value());
+                    if (hosting != null) {
+                        var choice = hosting.mapChoice(def.id());
+                        mapModes.add(def.id().value() + "=" + (choice.mapId() != null ? choice.mapId()
+                                : choice.mode().name().toLowerCase(java.util.Locale.ROOT)));
+                    }
+                }
+            }
+            d.put("installed", String.join(",", installed));
+            d.put("hosted", String.join(",", hosted));
+            d.put("maps", String.join(",", mapModes));
+        }
+        return d;
+    }
+
+    /** Uploads shared files edited by hand, then tells the other servers. Used by /tea reload. */
+    public void shareLocalEdits() {
+        pushSharedFiles();
+    }
+
     private void onSharedFilesEvent(me.playbosswar.tea.core.api.coordination.CoordinationEvent e) {
-        if (e.type() != me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.MAPS_CHANGED
+        if (e.type() != me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.FILES_CHANGED
                 || e.serverId().equals(coordinationBackend.serverId()) || !isEnabled()) {
             return;
         }
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
-            if (sharedFiles.pull().isEmpty()) {
+            java.util.Set<String> changed = sharedFiles.pull();
+            if (changed.isEmpty()) {
                 return;
             }
+            String me = getDataFolder().getName();
+            boolean maps = changed.stream().anyMatch(p -> p.startsWith(me + "/maps/") || p.startsWith(me + "/waiting-rooms/"));
+            boolean config = changed.stream().anyMatch(p -> !p.startsWith(me + "/maps/") && !p.startsWith(me + "/waiting-rooms/"));
             getServer().getScheduler().runTask(this, () -> {
-                getLogger().info("Maps or waiting rooms changed on " + e.serverId() + "; reloaded them.");
-                reloadMapsFromDisk();
-                if (arenaManager != null) {
-                    arenaManager.waitingRooms().load();
+                getLogger().info("Shared files changed on " + e.serverId() + ": " + String.join(", ", changed));
+                if (maps) {
+                    reloadMapsFromDisk();
+                    if (arenaManager != null) {
+                        arenaManager.waitingRooms().load();
+                    }
+                }
+                if (config) {
+                    reload();
                 }
             });
         });
@@ -1031,6 +1135,18 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     @Override
     public String serverId() {
         return config.network().serverId();
+    }
+
+    /**
+     * {@code network.group}, else {@code lobby} on a lobby and {@code arena}
+     * elsewhere. Settings can be changed for one group only.
+     */
+    public String serverGroup() {
+        String g = getConfig().getString("network.group", "");
+        if (g == null || g.isBlank()) {
+            return getConfig().getBoolean("lobby.enabled", false) ? "lobby" : "arena";
+        }
+        return g.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     @Override

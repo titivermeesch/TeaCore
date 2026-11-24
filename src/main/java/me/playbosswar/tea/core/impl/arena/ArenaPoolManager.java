@@ -129,10 +129,12 @@ public final class ArenaPoolManager {
                 var local = arenaManager.all().stream()
                         .filter(a -> a.gameId().equals(gameId))
                         .toList();
-                available = (int) local.stream().filter(ArenaPoolManager::isAvailable).count();
+                available = (int) local.stream().filter(ArenaPoolManager::isAvailable).count()
+                        + arenaManager.queuedAllocations(gameId);
                 freeSlots = local.stream().filter(ArenaPoolManager::isAvailable)
                         .mapToInt(a -> Math.max(0, a.maxPlayers() - a.players().size())).sum();
-                total = (int) local.stream().filter(a -> a.state() != ArenaState.RELEASED).count();
+                total = (int) local.stream().filter(a -> a.state() != ArenaState.RELEASED).count()
+                        + arenaManager.queuedAllocations(gameId);
             }
             // More players queued than the joinable arenas can take: open another
             // arena even though min-available is met.
@@ -184,7 +186,7 @@ public final class ArenaPoolManager {
             idleSince = 0;
             GameId game = Hosting.pick(hosted, g -> coordination.queueFor(g).size(), null);
             if (game != null) {
-                logger.info("Opening a " + game.value() + " arena (" + coordination.queueFor(game).size()
+                logger.info("Opening an arena for " + game.value() + " (" + coordination.queueFor(game).size()
                         + " queued).");
                 safeAllocate(game);
             }
@@ -288,12 +290,8 @@ public final class ArenaPoolManager {
             }
             return;
         }
-        try {
-            arenaManager.allocate(gameId);
-            loggedNoMaps.remove(gameId.value());
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Pool allocation failed for " + gameId, e);
-        }
+        arenaManager.allocateSoon(gameId, null);
+        loggedNoMaps.remove(gameId.value());
     }
 
     private void allocateViaControlCommand(GameId gameId) {

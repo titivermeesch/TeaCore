@@ -47,6 +47,7 @@ public final class DashboardServer {
         try {
             Javalin javalin = Javalin.create(cfg -> {
                 cfg.showJavalinBanner = false;
+                cfg.http.maxRequestSize = 300L * 1024 * 1024; // map zips
                 cfg.jetty.defaultHost = config.bindAddress();
                 cfg.jetty.defaultPort = config.port();
                 // spaRoot makes client-side-routed URLs (e.g. /arenas) fall back to index.html

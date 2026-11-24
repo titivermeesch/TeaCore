@@ -155,7 +155,7 @@ public final class YamlPatcher {
 
     // --------------------------------------------------------------- scanning
 
-    static Object load(String text) {
+    public static Object load(String text) {
         Object doc = new Yaml().load(text);
         return doc == null ? new LinkedHashMap<String, Object>() : doc;
     }

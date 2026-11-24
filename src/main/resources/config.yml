@@ -9,6 +9,9 @@ network:
   # the lobby's arena-pool.games config below is the single source of truth
   # for pool sizing in the fleet.
   eligible-matchmaker: true
+  # Settings can be changed for one group of servers. Empty means lobby on a
+  # server with lobby.enabled: true, else arena.
+  group: ""
 
 redis:
   host: localhost
@@ -91,6 +94,7 @@ features:
   # Record finished matches (game, map, winner, each player's K/D/A) for the
   # match history menu.
   match-history: true
+  match-recap: true
   # Map editor tool hotbar (region wand, point tool, checklist, save) and the
   # particle markers shown while editing a map with /tea map create|edit.
   map-editor-tools: true
@@ -208,6 +212,11 @@ maps:
   # server keeps a local copy, so a new server needs no map files. files: each
   # server uses only its own plugins/TeaCore/maps and waiting-rooms folders.
   storage: database
+
+# Share the menus, sidebars, theme and language files of TeaCore and every Tea
+# game through the database too, so each server shows the same ones. Edit them
+# on any server and run /tea reload to send the edit to the others.
+share-config-files: true
 
 # Discord webhooks: paste a channel's webhook URL (Channel settings >
 # Integrations > Webhooks) for each event you want posted. Empty = off. Each

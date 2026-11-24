@@ -12,9 +12,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
@@ -27,8 +24,8 @@ import java.util.stream.Stream;
 import javax.sql.DataSource;
 
 /**
- * Keeps {@code plugins/TeaCore/maps} and {@code waiting-rooms} the same on every
- * server through the database. The folders stay the working copy the map code
+ * Keeps shared files, such as {@code plugins/TeaCore/maps} and the menus of every
+ * Tea plugin, the same on every server through the database. The folders stay the working copy the map code
  * reads and writes; the database holds the shared version.
  *
  * <p>A server pulls at startup and whenever another server announces a change,
@@ -37,58 +34,65 @@ import javax.sql.DataSource;
  */
 public final class SharedFiles {
 
-    static final List<String> ROOTS = List.of("maps", "waiting-rooms");
     private static final int PART = 1024 * 1024;
-    private static final DateTimeFormatter STAMP =
-            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
     private final DataSource db;
     private final Path base;
+    private final List<String> roots;
     private final String serverId;
     private final Logger logger;
-    /** Path -> hash as of the last pull or push. */
+    /**
+     * Path -> hash as of the last pull or push. Kept on disk so that a file
+     * edited while the server was off is recognised as a local change at the
+     * next start instead of being replaced by the database copy.
+     */
     private final Map<String, String> synced = new HashMap<>();
+    private final Path stateFile;
 
-    public SharedFiles(DataSource db, Path dataFolder, String serverId, Logger logger) {
+    /**
+     * @param pluginsFolder the server's {@code plugins} folder
+     * @param roots         folders or files under it to share, such as {@code TeaCore/maps}
+     */
+    public SharedFiles(DataSource db, Path pluginsFolder, List<String> roots, String serverId, Logger logger) {
         this.db = db;
-        this.base = dataFolder;
+        this.base = pluginsFolder;
+        this.roots = List.copyOf(roots);
         this.serverId = serverId;
         this.logger = logger;
+        this.stateFile = pluginsFolder.resolve("TeaCore").resolve(".shared-files");
+        loadState();
     }
 
     /**
      * Brings the local folders up to date. The first server to run with an empty
-     * database uploads its files instead.
+     * database uploads its files instead. A local file the database doesn't have,
+     * or one edited here since the last sync, is left alone; the next push
+     * uploads it.
      *
      * @return the paths that changed locally
      */
-    public Set<String> pull() {
-        return pull(false);
+    public synchronized Set<String> pull() {
+        try {
+            return pullFiles();
+        } finally {
+            saveState();
+        }
     }
 
-    /**
-     * At startup a local file the database doesn't know came with the server, for
-     * example in its image, and is set aside. Later such a file is a new local
-     * map that the next push uploads.
-     */
-    public Set<String> pullAtStartup() {
-        return pull(true);
-    }
-
-    private synchronized Set<String> pull(boolean startup) {
+    private Set<String> pullFiles() {
         Set<String> changed = new LinkedHashSet<>();
         try (Connection c = db.getConnection()) {
             Map<String, String> remote = listRemote(c);
+            remote.keySet().removeIf(p -> !covered(p));
             Map<String, String> local = scanLocal();
             if (remote.isEmpty()) {
                 if (!local.isEmpty()) {
-                    logger.info("Uploading " + local.size() + " map and waiting room file(s) to the database.");
+                    logger.info("Uploading " + local.size() + " shared file(s) to the database.");
                     synced.clear();
                     pushChanges(c, local, remote);
                 }
                 return changed;
             }
-            Path setAside = null;
             for (Map.Entry<String, String> e : remote.entrySet()) {
                 String path = e.getKey();
                 String localHash = local.get(path);
@@ -114,28 +118,13 @@ public final class SharedFiles {
                 changed.add(path);
             }
             for (String path : local.keySet()) {
-                if (remote.containsKey(path)) {
-                    continue;
-                }
                 String known = synced.get(path);
-                if (known != null && known.equals(local.get(path))) {
+                if (!remote.containsKey(path) && known != null && known.equals(local.get(path)) && covered(path)) {
+                    // Deleted on another server since we last synced.
                     Files.deleteIfExists(resolve(path));
                     synced.remove(path);
                     changed.add(path);
-                } else if (known == null && startup) {
-                    // A file this server never shared, for example one baked into its image.
-                    if (setAside == null) {
-                        setAside = base.resolve("replaced-by-database").resolve(STAMP.format(Instant.now()));
-                    }
-                    Path target = setAside.resolve(path);
-                    Files.createDirectories(target.getParent());
-                    Files.move(resolve(path), target, StandardCopyOption.REPLACE_EXISTING);
-                    synced.remove(path);
-                    changed.add(path);
                 }
-            }
-            if (setAside != null) {
-                logger.info("Moved map files the database doesn't have to " + base.relativize(setAside));
             }
         } catch (SQLException | IOException e) {
             logger.log(Level.WARNING, "Could not load maps from the database; using the local files", e);
@@ -150,10 +139,40 @@ public final class SharedFiles {
      */
     public synchronized boolean push() {
         try (Connection c = db.getConnection()) {
-            return pushChanges(c, scanLocal(), listRemote(c));
+            Map<String, String> remote = listRemote(c);
+            remote.keySet().removeIf(p -> !covered(p));
+            return pushChanges(c, scanLocal(), remote);
         } catch (SQLException | IOException e) {
             logger.log(Level.WARNING, "Could not save maps to the database", e);
             return false;
+        } finally {
+            saveState();
+        }
+    }
+
+    private void loadState() {
+        if (!Files.isRegularFile(stateFile)) {
+            return;
+        }
+        try {
+            for (String line : Files.readAllLines(stateFile)) {
+                int space = line.indexOf(' ');
+                if (space > 0) {
+                    synced.put(line.substring(space + 1), line.substring(0, space));
+                }
+            }
+        } catch (IOException e) {
+            logger.log(Level.FINE, "Could not read " + stateFile, e);
+        }
+    }
+
+    private void saveState() {
+        StringBuilder out = new StringBuilder();
+        synced.forEach((path, hash) -> out.append(hash).append(' ').append(path).append('\n'));
+        try {
+            writeAtomically(stateFile, out.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            logger.log(Level.FINE, "Could not write " + stateFile, e);
         }
     }
 
@@ -274,8 +293,12 @@ public final class SharedFiles {
 
     private Map<String, String> scanLocal() throws IOException {
         Map<String, String> out = new HashMap<>();
-        for (String root : ROOTS) {
+        for (String root : roots) {
             Path dir = base.resolve(root);
+            if (Files.isRegularFile(dir)) {
+                out.put(root, hash(Files.readAllBytes(dir)));
+                continue;
+            }
             if (!Files.isDirectory(dir)) {
                 continue;
             }
@@ -292,9 +315,13 @@ public final class SharedFiles {
         return out;
     }
 
+    private boolean covered(String path) {
+        return roots.stream().anyMatch(r -> path.equals(r) || path.startsWith(r + "/"));
+    }
+
     private Path resolve(String path) throws IOException {
         Path p = base.resolve(path).normalize();
-        boolean inside = ROOTS.stream().anyMatch(r -> p.startsWith(base.resolve(r).normalize()));
+        boolean inside = roots.stream().anyMatch(r -> p.startsWith(base.resolve(r).normalize()));
         if (!inside) {
             throw new IOException("Refusing a shared file outside the map folders: " + path);
         }

@@ -206,6 +206,7 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         }
         try {
             plugin.reload();
+            plugin.shareLocalEdits();
             plugin.messageService().sendToSender(sender, "core.reload.success");
         } catch (Exception e) {
             plugin.messageService().sendToSender(sender, "core.reload.failed",

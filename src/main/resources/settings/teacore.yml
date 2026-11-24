@@ -16,6 +16,7 @@ categories:
       - { path: features.queue-bossbar, type: boolean, title: Queue boss bar, help: "Shows queued players their place in the queue." }
       - { path: features.lobby-hotbar, type: boolean, title: Lobby hotbar }
       - { path: features.match-history, type: boolean, title: Match history, help: "Stores finished matches for /profile and the dashboard." }
+      - { path: features.match-recap, type: boolean, title: Match recap, help: "A personal summary in chat when a match ends." }
       - { path: features.map-editor-tools, type: boolean, title: Map editor tools, help: "The wand, point tool and checklist while editing a map." }
       - { path: features.spectator-tools, type: boolean, title: Spectator tools }
       - { path: features.map-voting, type: boolean, title: Map voting }

@@ -24,7 +24,7 @@ public final class TeaMapCommand {
     static final List<String> SUBCOMMANDS = List.of(
             "create", "edit", "pos1", "pos2", "waiting", "addspawn", "clearspawns",
             "status", "board", "removeextension", "displayname",
-            "min", "max", "save", "discard", "list", "info", "reload", "delete", "history", "restore", "import", "help");
+            "min", "max", "save", "discard", "list", "info", "reload", "delete", "history", "restore", "import", "export", "import-zip", "help");
 
     private final TeaCorePlugin plugin;
 
@@ -61,6 +61,8 @@ public final class TeaMapCommand {
             case "history" -> history(sender, args);
             case "restore" -> restore(sender, args);
             case "import" -> importMap(sender, args);
+            case "export" -> exportZip(sender, args);
+            case "import-zip" -> importZip(sender, args);
             default -> runExtensionSubcommand(sender, args);
         }
     }
@@ -89,6 +91,8 @@ public final class TeaMapCommand {
         ms.sendToSender(sender, "core.map.help.delete");
         ms.sendToSender(sender, "core.map.help.history");
         ms.sendToSender(sender, "core.map.help.restore");
+        ms.sendToSender(sender, "core.map.help.export");
+        ms.sendToSender(sender, "core.map.help.import-zip");
         ms.sendToSender(sender, "core.map.help.hint-extensions");
     }
 
@@ -671,6 +675,61 @@ public final class TeaMapCommand {
                     "size", result.size()[0] + "x" + result.size()[1] + "x" + result.size()[2]));
         } catch (Exception e) {
             ms.sendToSender(sender, "core.map.import.failed", Map.of("reason", reasonOf(e)));
+        }
+    }
+
+    /** {@code /tea map export <game> <map>} or {@code /tea map export all}: a zip in plugins/TeaCore/exports/. */
+    private void exportZip(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.map.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        boolean all = args.length >= 2 && args[1].equalsIgnoreCase("all");
+        if (!all && args.length < 3) {
+            ms.sendToSender(sender, "core.map.export.usage");
+            return;
+        }
+        try {
+            String stamp = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+                    .format(java.time.LocalDateTime.now());
+            byte[] zip = all ? plugin.mapTransfer().exportAll()
+                    : plugin.mapTransfer().exportMap(GameId.of(args[1]), args[2].toLowerCase(Locale.ROOT));
+            String name = (all ? "all-maps" : args[1].toLowerCase(Locale.ROOT) + "-" + args[2].toLowerCase(Locale.ROOT))
+                    + "-" + stamp + ".zip";
+            java.nio.file.Path out = plugin.getDataFolder().toPath().resolve("exports").resolve(name);
+            java.nio.file.Files.createDirectories(out.getParent());
+            java.nio.file.Files.write(out, zip);
+            ms.sendToSender(sender, "core.map.export.done", Map.of("file", "plugins/TeaCore/exports/" + name));
+        } catch (Exception e) {
+            ms.sendToSender(sender, "core.map.export.failed", Map.of("reason", reasonOf(e)));
+        }
+    }
+
+    /** {@code /tea map import-zip <file>}: a zip from plugins/TeaCore/exports/. */
+    private void importZip(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.map.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        if (args.length < 2) {
+            ms.sendToSender(sender, "core.map.import-zip.usage");
+            return;
+        }
+        java.nio.file.Path dir = plugin.getDataFolder().toPath().resolve("exports").normalize();
+        java.nio.file.Path file = dir.resolve(args[1]).normalize();
+        if (!file.startsWith(dir) || !java.nio.file.Files.isRegularFile(file)) {
+            ms.sendToSender(sender, "core.map.import-zip.missing", Map.of("file", args[1]));
+            return;
+        }
+        try {
+            var result = plugin.importMaps(java.nio.file.Files.readAllBytes(file), sender.getName());
+            ms.sendToSender(sender, "core.map.import-zip.done", Map.of(
+                    "maps", result.maps().isEmpty() ? "-" : String.join(", ", result.maps()),
+                    "rooms", result.rooms().isEmpty() ? "-" : String.join(", ", result.rooms())));
+        } catch (Exception e) {
+            ms.sendToSender(sender, "core.map.import-zip.failed", Map.of("reason", reasonOf(e)));
         }
     }
 

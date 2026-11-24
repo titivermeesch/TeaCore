@@ -88,6 +88,16 @@ core:
   board:
     hidden: "<secondary>Sidebar hidden.</secondary> <muted>Type</muted> <accent>/board</accent> <muted>to show it again.</muted>"
     shown: "<success>Sidebar shown.</success>"
+  recap:
+    header: ""
+    win: "<success><bold>Victory!</bold></success> <muted>on <map> in <duration></muted>"
+    loss: "<error><bold>Defeat</bold></error> <muted>on <map> in <duration></muted>"
+    draw: "<warning><bold>Draw</bold></warning> <muted>on <map> in <duration></muted>"
+    you: "<secondary>You:</secondary> <highlight><kills></highlight> <secondary>kills,</secondary> <highlight><deaths></highlight> <secondary>deaths,</secondary> <highlight><assists></highlight> <secondary>assists,</secondary> <highlight><hearts></highlight> <secondary>hearts of damage</secondary> <muted>(#<place> of <players>)</muted>"
+    mvp: "<accent>MVP:</accent> <highlight><player></highlight> <muted>with <kills> kills</muted>"
+    mvp-you: "<accent><bold>You were the MVP</bold></accent> <muted>with <kills> kills</muted>"
+    rating: "<secondary>Rating:</secondary> <highlight><rating></highlight> <muted>(<change>)</muted>"
+    footer: "<muted>/profile shows your match history.</muted>"
   settings:
     saved: "<success>Saved.</success> <muted><note></muted>"
     saved-remote: "<success>Sent to <servers> server(s).</success> <muted><note></muted>"
@@ -256,6 +266,8 @@ core:
       delete: "<accent>/tea map delete <game> <map></accent> <muted>-</muted> <secondary>Delete a saved map (a backup is kept)</secondary>"
       history: "<accent>/tea map history <game> <map></accent> <muted>-</muted> <secondary>List a map's older versions</secondary>"
       restore: "<accent>/tea map restore <game> <map> <n></accent> <muted>-</muted> <secondary>Put version n back</secondary>"
+      export: "<accent>/tea map export <game> <map>|all</accent> <muted>-</muted> <secondary>Save maps to a zip in plugins/TeaCore/exports</secondary>"
+      import-zip: "<accent>/tea map import-zip <file></accent> <muted>-</muted> <secondary>Load maps from a zip in plugins/TeaCore/exports</secondary>"
       hint-extensions: "<muted>Game plugins may add their own subcommands; run </muted><accent>/tea map status</accent><muted> to see required ones.</muted>"
     displayname:
       set: "<success>Display name for</success> <accent><map></accent> <success>set to</success> <highlight><name></highlight>"
@@ -420,6 +432,15 @@ core:
     import:
       usage: "<secondary>Usage:</secondary> <accent>/tea map import <game> <map> <world folder> <points file></accent>"
       done: "<success>Imported</success> <accent><game>/<map></accent> <muted>(<size>)</muted>"
+      failed: "<error>Import failed: <reason></error>"
+    export:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map export <game> <map></accent> <secondary>or</secondary> <accent>/tea map export all</accent>"
+      done: "<success>Saved</success> <highlight><file></highlight><success>.</success>"
+      failed: "<error>Export failed: <reason></error>"
+    import-zip:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map import-zip <file></accent> <muted>(a zip in plugins/TeaCore/exports)</muted>"
+      missing: "<error>No file <file> in plugins/TeaCore/exports.</error>"
+      done: "<success>Loaded maps:</success> <highlight><maps></highlight><success>. Waiting rooms:</success> <highlight><rooms></highlight><success>.</success>"
       failed: "<error>Import failed: <reason></error>"
     restore:
       usage: "<secondary>Usage:</secondary> <accent>/tea map restore <game> <map> <n></accent>"

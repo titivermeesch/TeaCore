@@ -130,7 +130,7 @@ final class DashboardHistoryApi {
         MatchHistoryService.Query q = new MatchHistoryService.Query(base.game(), base.map(), base.player(),
                 base.from(), base.to(), CSV_MAX_MATCHES, 0);
         StringBuilder sb = new StringBuilder(
-                "match_id,ended_at,game,map,server,duration_seconds,winner_team,player_uuid,player,team,kills,deaths,assists,result\n");
+                "match_id,ended_at,game,map,server,duration_seconds,winner_team,player_uuid,player,team,kills,deaths,assists,damage,mvp,result\n");
         int rows = 0;
         for (MatchRecord m : allPages(q)) {
             for (PlayerMatch p : history().participants(m.matchId())) {
@@ -140,7 +140,9 @@ final class DashboardHistoryApi {
                         .append(cell(m.winnerTeam())).append(',')
                         .append(p.uuid() == null ? "" : p.uuid()).append(',').append(cell(p.name())).append(',')
                         .append(cell(p.team())).append(',').append(p.kills()).append(',').append(p.deaths())
-                        .append(',').append(p.assists()).append(',').append(p.result()).append('\n');
+                        .append(',').append(p.assists()).append(',').append(p.damage()).append(',')
+                        .append(p.uuid() != null && p.uuid().equals(m.mvpUuid())).append(',')
+                        .append(p.result()).append('\n');
                 rows++;
             }
         }
@@ -173,6 +175,7 @@ final class DashboardHistoryApi {
         row.put("durationSeconds", m.durationSeconds());
         row.put("winnerTeam", m.winnerTeam());
         row.put("winnerUuid", m.winnerUuid() == null ? null : m.winnerUuid().toString());
+        row.put("mvpUuid", m.mvpUuid() == null ? null : m.mvpUuid().toString());
         return row;
     }
 
@@ -184,6 +187,7 @@ final class DashboardHistoryApi {
         row.put("kills", p.kills());
         row.put("deaths", p.deaths());
         row.put("assists", p.assists());
+        row.put("damage", p.damage());
         row.put("result", p.result());
         return row;
     }

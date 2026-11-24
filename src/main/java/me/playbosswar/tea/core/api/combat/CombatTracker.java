@@ -55,6 +55,26 @@ public interface CombatTracker {
     /** Counted from {@link ArenaKillEvent}s; kept until the arena resets. */
     MatchStats matchStats(me.playbosswar.tea.core.api.arena.ArenaId arena, UUID player);
 
+    /**
+     * Lets a cosmetics plugin announce kills with its own line. A game with its
+     * own kill feed checks {@link #customKillMessage} and leaves the line to
+     * that plugin when it returns one.
+     *
+     * @param provider the MiniMessage line for a killer (with {@code <killer>} and
+     *                 {@code <victim>}), or {@code null} for the game's own line
+     */
+    default void setKillMessageProvider(java.util.function.@Nullable Function<UUID, @Nullable String> provider) {
+    }
+
+    default java.util.Optional<String> customKillMessage(UUID killer) {
+        return java.util.Optional.empty();
+    }
+
+    /** Damage {@code player} dealt to other players in the current or just-ended match. */
+    default double damageDealt(me.playbosswar.tea.core.api.arena.ArenaId arena, UUID player) {
+        return 0;
+    }
+
     /** Forgets every recorded hit on {@code victim} (e.g. on respawn or leave). */
     void clear(UUID victim);
 }

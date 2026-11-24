@@ -56,7 +56,7 @@ public record CoordinationEvent(
          * schemas and current values as JSON.
          */
         SETTINGS,
-        /** A server saved maps or waiting rooms to the database; the others pull them. */
-        MAPS_CHANGED
+        /** A server saved shared files (maps, menus...) to the database; the others pull them. */
+        FILES_CHANGED
     }
 }

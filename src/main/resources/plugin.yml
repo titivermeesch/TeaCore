@@ -207,6 +207,9 @@ permissions:
   tea.dashboard.settings:
     description: Change settings from the dashboard
     default: op
+  tea.dashboard.maps.transfer:
+    description: Download and upload maps on the dashboard
+    default: op
   tea.dashboard.admin:
     description: "Dashboard bundle: everything"
     default: op
@@ -221,3 +224,4 @@ permissions:
       tea.dashboard.maps.restore: true
       tea.dashboard.sessions: true
       tea.dashboard.settings: true
+      tea.dashboard.maps.transfer: true

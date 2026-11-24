@@ -146,6 +146,7 @@ export interface MatchSummary {
     durationSeconds: number;
     winnerTeam: string | null;
     winnerUuid: string | null;
+    mvpUuid?: string | null;
     winner: string;
     players: number;
 }
@@ -157,6 +158,7 @@ export interface MatchLine {
     kills: number;
     deaths: number;
     assists: number;
+    damage?: number;
     result: 'win' | 'loss' | 'draw' | 'left';
 }
 

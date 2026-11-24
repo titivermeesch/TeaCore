@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { History, Layers, MapPin, RefreshCw, RotateCcw, Timer, Trash2, UsersRound } from 'lucide-react';
+import { Download, History, Layers, MapPin, RefreshCw, RotateCcw, Timer, Trash2, Upload, UsersRound } from 'lucide-react';
 import { api, apiDelete, apiPost } from '../api';
 import { P, useCan } from '../auth';
 import type { GameSummary, MapInfo } from '../types';
@@ -10,6 +10,9 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '../components/ui/Table';
 
 export default function Games() {
     const canReload = useCan(P.mapsReload);
+    const canTransfer = useCan(P.mapsTransfer);
+    const [notice, setNotice] = useState<string | null>(null);
+    const [uploading, setUploading] = useState(false);
     const [games, setGames] = useState<GameSummary[] | null>(null);
     const [maps, setMaps] = useState<Record<string, MapInfo[]>>({});
     const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,28 @@ export default function Games() {
         }
     }
 
+    async function uploadMaps(file: File) {
+        setUploading(true);
+        setError(null);
+        setNotice(null);
+        try {
+            const res = await api<{ maps: string[]; rooms: string[] }>('/api/maps-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/zip' },
+                body: file,
+            });
+            const parts = [];
+            if (res.maps.length) parts.push(`maps ${res.maps.join(', ')}`);
+            if (res.rooms.length) parts.push(`waiting rooms ${res.rooms.join(', ')}`);
+            setNotice(`Uploaded ${parts.join(' and ')}. Every server gets them within seconds.`);
+            refresh();
+        } catch (err) {
+            setError(`Upload: ${(err as Error).message}`);
+        } finally {
+            setUploading(false);
+        }
+    }
+
     async function deleteMap(gameId: string, mapId: string) {
         if (!window.confirm(`Delete map ${gameId}/${mapId}? A backup is kept, so you can restore it with /tea map restore.`)) {
             return;
@@ -62,8 +87,35 @@ export default function Games() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-semibold">Games</h1>
+            <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-semibold mr-auto">Games</h1>
+                {canTransfer && (
+                    <>
+                        <a href="/api/maps-export" download>
+                            <Button variant="ghost" type="button">
+                                <Download className="h-4 w-4" /> Download all maps
+                            </Button>
+                        </a>
+                        <label>
+                            <input
+                                type="file"
+                                accept=".zip,application/zip"
+                                className="hidden"
+                                disabled={uploading}
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    e.target.value = '';
+                                    if (f) uploadMaps(f);
+                                }}
+                            />
+                            <span
+                                className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition bg-primary/10 border-primary/40 text-primary hover:bg-primary/20 ${uploading ? 'opacity-50' : ''}`}
+                            >
+                                <Upload className="h-4 w-4" /> {uploading ? 'Uploading...' : 'Upload maps'}
+                            </span>
+                        </label>
+                    </>
+                )}
                 {canReload && (
                     <Button onClick={reloadAllMaps} disabled={reloading}>
                         <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
@@ -71,6 +123,7 @@ export default function Games() {
                     </Button>
                 )}
             </div>
+            {notice && <div className="text-success text-sm">{notice}</div>}
             {error && (
                 <Card className="border-error/40">
                     <CardContent className="text-error text-sm">{error}</CardContent>
@@ -107,6 +160,7 @@ function GameCard({
     onRestored: () => void;
 }) {
     const canDelete = useCan(P.mapsDelete);
+    const canTransfer = useCan(P.mapsTransfer);
     const [openMap, setOpenMap] = useState<string | null>(null);
     return (
         <Card>
@@ -185,6 +239,13 @@ function GameCard({
                                             {m.extensions.length > 0 ? m.extensions.join(', ') : '-'}
                                         </Td>
                                         <Td className="text-right whitespace-nowrap space-x-1">
+                                            {canTransfer && (
+                                                <a href={`/api/maps/${game.id}/${m.mapId}/download`} download>
+                                                    <Button variant="ghost" title="Download map" type="button">
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                </a>
+                                            )}
                                             <Button
                                                 variant="ghost"
                                                 title="Older versions"

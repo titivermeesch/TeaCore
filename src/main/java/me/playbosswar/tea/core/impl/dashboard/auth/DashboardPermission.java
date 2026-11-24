@@ -24,11 +24,12 @@ public final class DashboardPermission {
     public static final String MAPS_RESTORE = "tea.dashboard.maps.restore";
     public static final String SESSIONS = "tea.dashboard.sessions";
     public static final String SETTINGS = "tea.dashboard.settings";
+    public static final String MAPS_TRANSFER = "tea.dashboard.maps.transfer";
 
     /** Checked at login and stored on the session. */
     public static final List<String> ALL = List.of(VIEW, CHAT, HISTORY_EXPORT, QUEUE_REMOVE, PLAYER_KICK,
             PLAYER_MOVE, PLAYER_SPECTATOR, ARENA_ALLOCATE, ARENA_START, ARENA_END, ARENA_RELEASE, MAPS_RELOAD,
-            MAPS_DELETE, MAPS_RESTORE, SESSIONS, SETTINGS);
+            MAPS_DELETE, MAPS_RESTORE, SESSIONS, SETTINGS, MAPS_TRANSFER);
 
     private DashboardPermission() {
     }

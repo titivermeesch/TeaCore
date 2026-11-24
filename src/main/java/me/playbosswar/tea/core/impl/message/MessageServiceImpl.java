@@ -202,6 +202,9 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
 
     @Override
     public boolean hasKey(String key) {
+        if (key.startsWith(LITERAL)) {
+            return true;
+        }
         for (LocaleBundle bundle : bundles.values()) {
             if (bundle.get(key) != null) return true;
         }
@@ -242,6 +245,9 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
     }
 
     private String lookup(String locale, String key) {
+        if (key.startsWith(LITERAL)) {
+            return key.substring(LITERAL.length());
+        }
         LocaleBundle bundle = bundles.get(locale);
         if (bundle != null) {
             String v = bundle.get(key);
@@ -258,6 +264,8 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
         }
         return "<error>missing translation: " + key + "</error>";
     }
+
+    private static final String LITERAL = me.playbosswar.tea.core.api.message.MessageService.LITERAL_PREFIX;
 
     @Override
     public void close() {

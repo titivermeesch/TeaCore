@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, History as HistoryIcon, Plus, RotateCcw, Save, Trash2, Undo2 } from 'lucide-react';
 import { api, apiPost } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -52,18 +52,32 @@ export default function Settings() {
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [group, setGroup] = useState('');
+    const [groups, setGroups] = useState<string[]>([]);
+    const [view, setView] = useState<'settings' | 'history'>('settings');
 
     const refresh = useCallback(async () => {
         try {
-            setFiles(await api<SettingsFile[]>('/api/settings'));
+            setFiles(await api<SettingsFile[]>(`/api/settings${group ? `?group=${encodeURIComponent(group)}` : ''}`));
         } catch (err) {
             setError((err as Error).message);
         }
-    }, []);
+    }, [group]);
 
     useEffect(() => {
         refresh();
     }, [refresh]);
+
+    useEffect(() => {
+        api<string[]>('/api/settings-groups').then(setGroups).catch(() => {});
+    }, []);
+
+    function pickGroup(g: string) {
+        if (Object.keys(draft).length && !window.confirm('Discard your unsaved changes?')) return;
+        setDraft({});
+        setGroup(g);
+        setNotice(null);
+    }
 
     const file = useMemo(
         () => files?.find((f) => f.id === selected) ?? files?.[0] ?? null,
@@ -88,6 +102,7 @@ export default function Settings() {
         try {
             const res = await apiPost<{ targets: string[] }>(`/api/settings/${file.id}`, {
                 changes: Object.entries(draft).map(([path, value]) => ({ path, value })),
+                group: group || undefined,
             });
             setDraft({});
             const n = res.targets.length;
@@ -123,6 +138,9 @@ export default function Settings() {
         <div className="space-y-6">
             <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-semibold mr-auto">Settings</h1>
+                <Button variant="ghost" onClick={() => setView(view === 'history' ? 'settings' : 'history')}>
+                    <HistoryIcon className="h-4 w-4" /> {view === 'history' ? 'Back to settings' : 'History'}
+                </Button>
                 {notice && <span className="text-sm text-success">{notice}</span>}
                 <Button variant="ghost" disabled={!dirty || saving} onClick={() => setDraft({})}>
                     <RotateCcw className="h-4 w-4" /> Discard
@@ -132,6 +150,31 @@ export default function Settings() {
                 </Button>
             </div>
             {error && <div className="text-error text-sm">{error}</div>}
+
+            {view === 'history' ? (
+                <HistoryView files={files} onUndone={refresh} />
+            ) : (
+            <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-muted">Apply to</span>
+                <select
+                    className="rounded-md bg-bg-raised border border-border px-3 py-1.5 text-sm"
+                    value={group}
+                    onChange={(e) => pickGroup(e.target.value)}
+                >
+                    <option value="">Every server</option>
+                    {groups.map((g) => (
+                        <option key={g} value={g}>
+                            {g} servers only
+                        </option>
+                    ))}
+                </select>
+                {group && (
+                    <span className="text-xs text-muted">
+                        A value saved for {group} servers wins over the value for every server.
+                    </span>
+                )}
+            </div>
 
             <div className="flex flex-wrap gap-2">
                 {files.map((f) => (
@@ -189,7 +232,93 @@ export default function Settings() {
                     </CardContent>
                 </Card>
             </div>
+            </>
+            )}
         </div>
+    );
+}
+
+interface HistoryEntry {
+    id: string;
+    file: string;
+    group: string;
+    path: string;
+    oldValue: unknown;
+    newValue: unknown;
+    at: number;
+    actor: string;
+    revertedBy: string | null;
+}
+
+function short(v: unknown) {
+    if (v === null || v === undefined) return 'not set';
+    const s = typeof v === 'string' ? v : JSON.stringify(v);
+    return s.length > 60 ? s.slice(0, 57) + '...' : s;
+}
+
+function HistoryView({ files, onUndone }: { files: SettingsFile[]; onUndone: () => void }) {
+    const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const titles = Object.fromEntries(files.map((f) => [f.id, f.title]));
+
+    const load = useCallback(async () => {
+        try {
+            setEntries(await api<HistoryEntry[]>('/api/settings-history?limit=200'));
+        } catch (err) {
+            setError((err as Error).message);
+        }
+    }, []);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    async function undo(e: HistoryEntry) {
+        if (!window.confirm(`Put ${e.path} back to ${short(e.oldValue)}?`)) return;
+        try {
+            await apiPost(`/api/settings-history/${e.id}/revert`);
+            load();
+            window.setTimeout(onUndone, 1200);
+        } catch (err) {
+            setError((err as Error).message);
+        }
+    }
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Recent changes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+                {error && <div className="text-error text-sm">{error}</div>}
+                {entries?.length === 0 && <div className="text-sm text-muted">No changes yet.</div>}
+                <div className="divide-y divide-border">
+                    {(entries ?? []).map((e) => (
+                        <div key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+                            <span className="text-muted tabular-nums w-36">{new Date(e.at).toLocaleString()}</span>
+                            <span className="w-40 truncate">{e.actor}</span>
+                            <span className="font-medium">{titles[e.file] ?? e.file}</span>
+                            {e.group && <Badge variant="muted">{e.group} only</Badge>}
+                            <code className="text-xs text-muted">{e.path}</code>
+                            <span className="text-xs">
+                                <span className="text-muted line-through">{short(e.oldValue)}</span>
+                                {' -> '}
+                                <span>{short(e.newValue)}</span>
+                            </span>
+                            <span className="ml-auto">
+                                {e.revertedBy ? (
+                                    <Badge variant="muted">undone</Badge>
+                                ) : (
+                                    <Button variant="ghost" onClick={() => undo(e)} title="Undo this change">
+                                        <Undo2 className="h-4 w-4" /> Undo
+                                    </Button>
+                                )}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </CardContent>
+        </Card>
     );
 }
 

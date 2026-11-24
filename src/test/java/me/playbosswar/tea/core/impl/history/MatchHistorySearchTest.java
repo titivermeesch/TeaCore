@@ -35,7 +35,7 @@ class MatchHistorySearchTest {
         HikariConfig hc = new HikariConfig();
         hc.setJdbcUrl("jdbc:sqlite:" + dir.resolve("t.db"));
         ds = new HikariDataSource(hc);
-        for (String file : new String[]{"V008__match_history.sql", "V009__dashboard.sql"}) {
+        for (String file : new String[]{"V008__match_history.sql", "V009__dashboard.sql", "V014__match_recap.sql"}) {
             try (InputStream in = getClass().getResourceAsStream("/db/migrations/core/" + file);
                  Connection c = ds.getConnection(); Statement s = c.createStatement()) {
                 for (String stmt : new String(in.readAllBytes(), StandardCharsets.UTF_8).split(";\\s*\\n")) {

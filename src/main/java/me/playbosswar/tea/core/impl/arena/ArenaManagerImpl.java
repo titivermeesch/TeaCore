@@ -87,6 +87,60 @@ public final class ArenaManagerImpl implements ArenaManager {
         return waitingAreas;
     }
 
+    /** Spacing between new arena worlds made by {@link #allocateSoon}; creating a world blocks the main thread. */
+    private static final long WORLD_SPACING_MS = 250;
+    private record QueuedAllocation(GameId game, @Nullable String map) { }
+    private final java.util.ArrayDeque<QueuedAllocation> allocQueue = new java.util.ArrayDeque<>();
+    private org.bukkit.scheduler.BukkitTask allocDrain;
+    private long lastWorldCreatedAt;
+
+    /**
+     * Allocates now, or a few ticks later when another arena world was just
+     * created, so a burst of allocations doesn't stall one tick. For the pool and
+     * requests from other servers; admin commands call {@link #allocate} directly.
+     */
+    public void allocateSoon(GameId gameId, @Nullable String mapId) {
+        if (allocQueue.isEmpty() && System.currentTimeMillis() - lastWorldCreatedAt >= WORLD_SPACING_MS) {
+            allocateLogged(gameId, mapId);
+            return;
+        }
+        allocQueue.add(new QueuedAllocation(gameId, mapId));
+        if (allocDrain == null) {
+            allocDrain = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+                if (System.currentTimeMillis() - lastWorldCreatedAt < WORLD_SPACING_MS) {
+                    return;
+                }
+                QueuedAllocation next = allocQueue.poll();
+                if (next != null) {
+                    allocateLogged(next.game(), next.map());
+                }
+                if (allocQueue.isEmpty() && allocDrain != null) {
+                    allocDrain.cancel();
+                    allocDrain = null;
+                }
+            }, 1L, 1L);
+        }
+    }
+
+    /** Allocations {@link #allocateSoon} is still holding back for this game. */
+    public int queuedAllocations(GameId gameId) {
+        int n = 0;
+        for (QueuedAllocation q : allocQueue) {
+            if (q.game().equals(gameId)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    private void allocateLogged(GameId gameId, @Nullable String mapId) {
+        try {
+            allocate(gameId, mapId);
+        } catch (RuntimeException e) {
+            logger.log(java.util.logging.Level.WARNING, "Allocation failed for " + gameId, e);
+        }
+    }
+
     @Override
     public Arena allocate(GameId gameId, @Nullable String forcedMapId) {
         GameDefinition def = gameRegistry.get(gameId)
@@ -109,6 +163,7 @@ public final class ArenaManagerImpl implements ArenaManager {
         boolean reused = world != null;
         if (world == null) {
             world = createVoidWorld(arenaId, def.arenaWorld());
+            lastWorldCreatedAt = System.currentTimeMillis();
         }
         arena.setWorld(world);
         WaitingRooms.Room room = waitingRooms.roomFor(gameId, mapDef.mapId()).orElse(null);

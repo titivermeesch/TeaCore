@@ -74,7 +74,7 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
         MatchStats stats = core.combat().matchStats(arena.id(), uuid);
         leavers.computeIfAbsent(arena.id(), k -> new ConcurrentHashMap<>()).put(uuid, new Object[]{
                 uuid.toString(), team, stats.kills(), stats.deaths(), stats.assists(), "left",
-                event.player().getName()});
+                event.player().getName(), (int) Math.round(core.combat().damageDealt(arena.id(), uuid))});
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -98,7 +98,8 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
                     : (uuid.equals(winner) ? "win" : "loss");
             org.bukkit.entity.Player online = plugin.getServer().getPlayer(uuid);
             String name = online != null ? online.getName() : plugin.getServer().getOfflinePlayer(uuid).getName();
-            rows.add(new Object[]{uuid.toString(), team, stats.kills(), stats.deaths(), stats.assists(), result, name});
+            rows.add(new Object[]{uuid.toString(), team, stats.kills(), stats.deaths(), stats.assists(), result, name,
+                    (int) Math.round(core.combat().damageDealt(arena.id(), uuid))});
         }
         Map<UUID, Object[]> left = leavers.remove(arena.id());
         if (left != null) {
@@ -111,7 +112,9 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
         }
         MatchRecord record = new MatchRecord(arena.matchId(), arena.gameId().value(), arena.mapId().orElse(null),
                 core.serverId(), end, start == null ? 0 : (int) Math.max(0, end.getEpochSecond() - start.getEpochSecond()),
-                winningTeam == null ? null : winningTeam.value(), winner);
+                winningTeam == null ? null : winningTeam.value(), winner,
+                me.playbosswar.tea.core.impl.recap.Mvp.of(
+                        me.playbosswar.tea.core.impl.recap.Mvp.ranking(core, arena, arena.players())));
         Instant started = start;
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> write(record, started, rows));
     }
@@ -119,8 +122,8 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
     private void write(MatchRecord record, @Nullable Instant started, List<Object[]> rows) {
         try (Connection c = dataSource.getConnection()) {
             try (PreparedStatement ps = c.prepareStatement("INSERT INTO tea_match_history (match_id, game_id, "
-                    + "map_id, server_id, started_at, ended_at, duration_seconds, winner_team, winner_uuid) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                    + "map_id, server_id, started_at, ended_at, duration_seconds, winner_team, winner_uuid, mvp_uuid) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 ps.setString(1, record.matchId().toString());
                 ps.setString(2, record.gameId());
                 ps.setString(3, record.mapId());
@@ -130,10 +133,11 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
                 ps.setInt(7, record.durationSeconds());
                 ps.setString(8, record.winnerTeam());
                 ps.setString(9, record.winnerUuid() == null ? null : record.winnerUuid().toString());
+                ps.setString(10, record.mvpUuid() == null ? null : record.mvpUuid().toString());
                 ps.executeUpdate();
             }
             try (PreparedStatement ps = c.prepareStatement("INSERT INTO tea_match_players (match_id, uuid, team, "
-                    + "kills, deaths, assists, result, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                    + "kills, deaths, assists, result, name, damage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 for (Object[] row : rows) {
                     ps.setString(1, record.matchId().toString());
                     ps.setString(2, (String) row[0]);
@@ -143,6 +147,7 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
                     ps.setInt(6, (Integer) row[4]);
                     ps.setString(7, (String) row[5]);
                     ps.setString(8, (String) row[6]);
+                    ps.setInt(9, row.length > 7 ? (Integer) row[7] : 0);
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -153,11 +158,11 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
     }
 
     private static final String MATCH_COLUMNS = "h.match_id, h.game_id, h.map_id, h.server_id, h.ended_at, "
-            + "h.duration_seconds, h.winner_team, h.winner_uuid";
+            + "h.duration_seconds, h.winner_team, h.winner_uuid, h.mvp_uuid";
 
     @Override
     public List<PlayerMatch> recentFor(UUID player, int limit) {
-        String sql = "SELECT " + MATCH_COLUMNS + ", p.team, p.kills, p.deaths, p.assists, p.result, p.uuid, p.name "
+        String sql = "SELECT " + MATCH_COLUMNS + ", p.team, p.kills, p.deaths, p.assists, p.result, p.uuid, p.name, p.damage "
                 + "FROM tea_match_players p JOIN tea_match_history h ON h.match_id = p.match_id "
                 + "WHERE p.uuid = ? ORDER BY h.ended_at DESC LIMIT ?";
         List<PlayerMatch> out = new ArrayList<>();
@@ -199,7 +204,7 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
 
     @Override
     public List<PlayerMatch> participants(UUID matchId) {
-        String sql = "SELECT " + MATCH_COLUMNS + ", p.team, p.kills, p.deaths, p.assists, p.result, p.uuid, p.name "
+        String sql = "SELECT " + MATCH_COLUMNS + ", p.team, p.kills, p.deaths, p.assists, p.result, p.uuid, p.name, p.damage "
                 + "FROM tea_match_players p JOIN tea_match_history h ON h.match_id = p.match_id "
                 + "WHERE p.match_id = ? ORDER BY p.kills DESC";
         List<PlayerMatch> out = new ArrayList<>();
@@ -337,13 +342,14 @@ public final class MatchHistoryServiceImpl implements MatchHistoryService, Liste
         return new MatchRecord(UUID.fromString(rs.getString("match_id")), rs.getString("game_id"),
                 rs.getString("map_id"), rs.getString("server_id"),
                 ended == null ? Instant.EPOCH : ended.toInstant(), rs.getInt("duration_seconds"),
-                rs.getString("winner_team"), winner == null ? null : UUID.fromString(winner));
+                rs.getString("winner_team"), winner == null ? null : UUID.fromString(winner),
+                rs.getString("mvp_uuid") == null ? null : UUID.fromString(rs.getString("mvp_uuid")));
     }
 
     private static PlayerMatch playerLine(ResultSet rs) throws SQLException {
         String uuid = rs.getString("uuid");
         return new PlayerMatch(match(rs), rs.getString("team"), rs.getInt("kills"), rs.getInt("deaths"),
                 rs.getInt("assists"), rs.getString("result"), uuid == null ? null : UUID.fromString(uuid),
-                rs.getString("name"));
+                rs.getString("name"), rs.getInt("damage"));
     }
 }
