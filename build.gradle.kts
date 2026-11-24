@@ -114,8 +114,9 @@ dependencies {
     implementation(libs.caffeine)
     implementation(libs.javalin)
     implementation(libs.jackson.databind)
-    implementation(libs.sqlite.jdbc)
-    implementation(libs.mysql.connector)
+    compileOnly(libs.sqlite.jdbc)
+    testImplementation(libs.sqlite.jdbc)
+    implementation(libs.mysql.connector) { exclude(group = "com.google.protobuf") }
     // FastStats — error tracking + custom metrics, shaded with relocation so
     // it can't collide with another plugin's copy.
     implementation("dev.faststats.metrics:bukkit:0.22.0")
@@ -190,8 +191,9 @@ tasks.shadowJar {
     relocate("kotlin", "$base.kotlin")
     relocate("dev.faststats", "$base.faststats")
     relocate("com.cryptomorin.xseries", "$base.xseries")
-    // org.sqlite.* is intentionally NOT relocated: the native .so binds JNI
-    // symbols to the original package name and relocating breaks at connect.
+    exclude("com/mysql/cj/x/protobuf/**")
+    exclude("javax/servlet/resources/**", "jakarta/servlet/resources/**")
+    exclude("**/*.js.map")
 }
 
 tasks.build {
