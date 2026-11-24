@@ -9,16 +9,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
 /**
- * Helpers for marshaling Javalin worker-thread handlers onto the Bukkit main
- * thread.
- *
- * <p>
- * Every Bukkit API call (world creation, player teleport, event dispatch)
- * must run on the main thread; Javalin serves HTTP requests from a Jetty
- * worker pool, so control-plane endpoints that mutate arenas or maps have to
- * hop threads before touching anything. {@link #runSync(Plugin, Callable)}
- * wraps {@code Bukkit.getScheduler().callSyncMethod} with a timeout and
- * unwraps checked exceptions into unchecked form the handler can rethrow.
+ * Javalin serves requests from a Jetty worker pool, but Bukkit calls must run on the
+ * main thread. {@link #runSync(Plugin, Callable)} wraps {@code callSyncMethod} with a
+ * timeout and unwraps checked exceptions so the handler can rethrow them.
  */
 final class MainThread {
 

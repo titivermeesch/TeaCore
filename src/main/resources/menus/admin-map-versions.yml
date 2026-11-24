@@ -1,0 +1,31 @@
+# Older versions of one map (arguments: game, map), newest first. Per version:
+# {game} {map} {n} (1 = newest) {when} {actor} {reason} (save, delete, ...)
+enabled: true
+permission: tea.map.admin
+title: "<primary>Versions of {map}"
+rows: 6
+pattern:
+  - "VVVVVVVVV"
+  - "VVVVVVVVV"
+  - "VVVVVVVVV"
+  - "VVVVVVVVV"
+  - "VVVVVVVVV"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'V':
+    source: admin-map-versions
+    item:
+      name: "<primary>#{n} <secondary>{when}"
+      lore:
+        - "<secondary>By: <highlight>{actor}"
+        - "<secondary>Kept before: <highlight>{reason}"
+        - ""
+        - "<success>Click: restore this version"
+      actions: ["confirm:Restore {map} to #{n}?|admin-map-restore:{game} {map} {n}"]
+    empty: { material: BARRIER, name: "<muted>No older versions yet" }

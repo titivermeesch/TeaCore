@@ -11,14 +11,6 @@ import me.playbosswar.tea.core.api.message.MessageService;
 import me.playbosswar.tea.core.api.sidebar.SidebarProvider;
 import org.bukkit.entity.Player;
 
-/**
- * Sidebar that walks an admin through the remaining map-setup steps while they
- * author a map, showing the next {@link #WINDOW} incomplete steps plus a
- * "+N more" footer rather than the whole checklist at once. The step list comes
- * from {@link MapEditingService#remainingSteps(Player)}, which folds in each
- * game's required map extensions, so every game gets identical guidance for
- * free. Registered with the {@link me.playbosswar.tea.core.impl.scoreboard.ScoreboardManager}.
- */
 public final class MapSetupSidebar implements SidebarProvider {
 
     /** Above game (100) and lobby (50) layouts: an admin editing a map needs the checklist. */
@@ -31,7 +23,6 @@ public final class MapSetupSidebar implements SidebarProvider {
 
     private final MapEditingService editing;
     private final MessageService messageService;
-    /** Players who toggled the sidebar off for their current authoring session. */
     private final Set<UUID> hidden = ConcurrentHashMap.newKeySet();
 
     public MapSetupSidebar(MapEditingService editing, MessageService messageService) {
@@ -39,11 +30,6 @@ public final class MapSetupSidebar implements SidebarProvider {
         this.messageService = messageService;
     }
 
-    /**
-     * Toggles the sidebar for an editing player.
-     *
-     * @return {@code true} if it is now shown, {@code false} if hidden.
-     */
     public boolean toggle(Player player) {
         UUID id = player.getUniqueId();
         if (hidden.remove(id))

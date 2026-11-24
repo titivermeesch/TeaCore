@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Play, Plus, Square, Trophy } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Play, Plus, Square, Trophy } from 'lucide-react';
 import { api, apiPost } from '../api';
+import { P, useCan } from '../auth';
 import type { Arena, GameSummary, MapInfo } from '../types';
 import { useDashboardEvent } from '../ws';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -16,9 +18,9 @@ export default function Arenas() {
     const [arenas, setArenas] = useState<Arena[]>([]);
     const [games, setGames] = useState<GameSummary[]>([]);
     const [filter, setFilter] = useState<StateFilter>('ALL');
-    const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [showAllocate, setShowAllocate] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const canAllocate = useCan(P.arenaAllocate);
 
     async function refresh() {
         try {
@@ -56,15 +58,6 @@ export default function Arenas() {
         [arenas, filter],
     );
 
-    function toggle(id: string) {
-        setExpanded((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    }
-
     async function doAction(label: string, fn: () => Promise<unknown>, confirmMsg?: string) {
         if (confirmMsg && !window.confirm(confirmMsg)) return;
         try {
@@ -92,10 +85,12 @@ export default function Arenas() {
                             </Button>
                         ))}
                     </div>
-                    <Button onClick={() => setShowAllocate((v) => !v)}>
-                        <Plus className="h-4 w-4" />
-                        Allocate
-                    </Button>
+                    {canAllocate && (
+                        <Button onClick={() => setShowAllocate((v) => !v)}>
+                            <Plus className="h-4 w-4" />
+                            Allocate
+                        </Button>
+                    )}
                 </div>
             </div>
             {showAllocate && (
@@ -121,7 +116,6 @@ export default function Arenas() {
                         <Table>
                             <Thead>
                                 <Tr>
-                                    <Th className="w-6"></Th>
                                     <Th>Server</Th>
                                     <Th>Game</Th>
                                     <Th>Map</Th>
@@ -133,13 +127,7 @@ export default function Arenas() {
                             </Thead>
                             <Tbody>
                                 {filtered.map((a) => (
-                                    <ArenaRows
-                                        key={a.id}
-                                        arena={a}
-                                        open={expanded.has(a.id)}
-                                        onToggle={() => toggle(a.id)}
-                                        onAction={doAction}
-                                    />
+                                    <ArenaRow key={a.id} arena={a} onAction={doAction} />
                                 ))}
                             </Tbody>
                         </Table>
@@ -234,159 +222,74 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     );
 }
 
-function ArenaRows({
+function ArenaRow({
     arena,
-    open,
-    onToggle,
     onAction,
 }: {
     arena: Arena;
-    open: boolean;
-    onToggle: () => void;
     onAction: (label: string, fn: () => Promise<unknown>, confirmMsg?: string) => Promise<void>;
 }) {
-    const canStart = arena.state === 'WAITING' || arena.state === 'COUNTDOWN';
+    const canStartPerm = useCan(P.arenaStart);
+    const canEndPerm = useCan(P.arenaEnd);
+    const canReleasePerm = useCan(P.arenaRelease);
+    const canStart = canStartPerm && (arena.state === 'WAITING' || arena.state === 'COUNTDOWN');
     const isLive = arena.state === 'LIVE';
     const isReleased = arena.state === 'RELEASED';
 
     return (
-        <>
-            <Tr>
-                <Td onClick={onToggle} className="cursor-pointer">
-                    {open ? <ChevronDown className="h-4 w-4 text-muted" /> : <ChevronRight className="h-4 w-4 text-muted" />}
-                </Td>
-                <Td className="font-mono text-xs text-muted">{arena.serverId}</Td>
-                <Td className="font-medium">{arena.gameId}</Td>
-                <Td>{arena.mapId ?? '-'}</Td>
-                <Td>
-                    <Badge variant={stateVariant(arena.state)}>{arena.state}</Badge>
-                </Td>
-                <Td className="tabular-nums">
-                    {arena.players.length > 0 ? `${arena.players.length}/${arena.maxPlayers}` : `-/${arena.maxPlayers}`}
-                </Td>
-                <Td className="font-mono text-muted tabular-nums">
-                    {arena.phaseSecondsRemaining < 0 ? '-' : `${arena.phaseSecondsRemaining}s`}
-                </Td>
-                <Td>
-                    <div className="flex justify-end gap-1">
-                        {canStart && (
-                            <Button
-                                variant="ghost"
-                                title="Force start"
-                                onClick={() =>
-                                    onAction('force-start', () =>
-                                        apiPost(`/api/arenas/${arena.id}/start`),
-                                    )
-                                }
-                            >
-                                <Play className="h-4 w-4" />
-                            </Button>
-                        )}
-                        {isLive && (
-                            <Button
-                                variant="ghost"
-                                title="End match"
-                                onClick={() =>
-                                    onAction('end-match', () =>
-                                        apiPost(`/api/arenas/${arena.id}/end-match`, {}),
-                                    )
-                                }
-                            >
+        <Tr>
+            <Td className="font-mono text-xs text-muted">{arena.serverId}</Td>
+            <Td className="font-medium">
+                <Link to={`/arenas/${arena.id}`} className="text-primary hover:underline">
+                    {arena.gameId} <span className="font-mono text-xs text-muted">#{arena.id.slice(0, 8)}</span>
+                </Link>
+            </Td>
+            <Td>{arena.mapId ?? '-'}</Td>
+            <Td>
+                <Badge variant={stateVariant(arena.state)}>{arena.state}</Badge>
+            </Td>
+            <Td className="tabular-nums">
+                {arena.players.length}/{arena.maxPlayers}
+                {arena.spectators.length > 0 && <span className="text-muted"> +{arena.spectators.length}</span>}
+            </Td>
+            <Td className="font-mono text-muted tabular-nums">
+                {arena.phaseSecondsRemaining < 0 ? '-' : `${arena.phaseSecondsRemaining}s`}
+            </Td>
+            <Td>
+                <div className="flex justify-end gap-1">
+                    {canStart && (
+                        <Button
+                            variant="ghost"
+                            title="Skip to the next phase"
+                            onClick={() => onAction('force-start', () => apiPost(`/api/arenas/${arena.id}/start`))}
+                        >
+                            <Play className="h-4 w-4" />
+                        </Button>
+                    )}
+                    {canEndPerm && isLive && (
+                        <Link to={`/arenas/${arena.id}`} title="End match (pick the winner)">
+                            <Button variant="ghost">
                                 <Trophy className="h-4 w-4" />
                             </Button>
-                        )}
-                        {!isReleased && (
-                            <Button
-                                variant="danger"
-                                title="Release"
-                                onClick={() =>
-                                    onAction(
-                                        'release',
-                                        () => apiPost(`/api/arenas/${arena.id}/release`),
-                                        `Release arena ${arena.id}? Players will be evacuated.`,
-                                    )
-                                }
-                            >
-                                <Square className="h-4 w-4" />
-                            </Button>
-                        )}
-                    </div>
-                </Td>
-            </Tr>
-            {open && (
-                <Tr className="bg-bg-raised/30">
-                    <Td></Td>
-                    <Td colSpan={7}>
-                        <ArenaDetails arena={arena} />
-                    </Td>
-                </Tr>
-            )}
-        </>
-    );
-}
-
-function ArenaDetails({ arena }: { arena: Arena }) {
-    const remote = arena.matchId === null;
-    return (
-        <div className="space-y-3 py-2 text-sm">
-            <div className="grid grid-cols-2 gap-4 font-mono text-xs">
-                <div>
-                    <span className="text-muted">arena.id </span>
-                    <span>{arena.id}</span>
-                </div>
-                <div>
-                    <span className="text-muted">server </span>
-                    <span>{arena.serverId}</span>
-                </div>
-                <div>
-                    <span className="text-muted">match.id </span>
-                    <span>{arena.matchId ?? '(remote)'}</span>
-                </div>
-                <div>
-                    <span className="text-muted">world </span>
-                    <span>{arena.worldName ?? '(remote)'}</span>
-                </div>
-            </div>
-            {remote ? (
-                <div className="text-xs text-muted">
-                    Arena is hosted on another backend; player rosters are not mirrored over the
-                    coordination channel. Sign in to the dashboard on <span className="font-mono">{arena.serverId}</span> for
-                    the full roster.
-                </div>
-            ) : (
-                <>
-                    <div>
-                        <div className="text-xs uppercase text-muted tracking-wide mb-1">
-                            Players ({arena.players.length})
-                        </div>
-                        {arena.players.length === 0 ? (
-                            <div className="text-muted text-xs">none</div>
-                        ) : (
-                            <div className="flex flex-wrap gap-2">
-                                {arena.players.map((p) => (
-                                    <Badge key={p.uuid} variant="muted">
-                                        {p.name ?? p.uuid.slice(0, 8)}
-                                    </Badge>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    {arena.spectators.length > 0 && (
-                        <div>
-                            <div className="text-xs uppercase text-muted tracking-wide mb-1">
-                                Spectators ({arena.spectators.length})
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {arena.spectators.map((p) => (
-                                    <Badge key={p.uuid} variant="muted">
-                                        {p.name ?? p.uuid.slice(0, 8)}
-                                    </Badge>
-                                ))}
-                            </div>
-                        </div>
+                        </Link>
                     )}
-                </>
-            )}
-        </div>
+                    {canReleasePerm && !isReleased && (
+                        <Button
+                            variant="danger"
+                            title="Release"
+                            onClick={() =>
+                                onAction(
+                                    'release',
+                                    () => apiPost(`/api/arenas/${arena.id}/release`),
+                                    `Release arena ${arena.id}? Players will be evacuated.`,
+                                )
+                            }
+                        >
+                            <Square className="h-4 w-4" />
+                        </Button>
+                    )}
+                </div>
+            </Td>
+        </Tr>
     );
 }

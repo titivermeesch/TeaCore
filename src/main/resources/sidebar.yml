@@ -5,6 +5,22 @@
 # Lines are MiniMessage with theme tags (<primary>, <secondary>, <accent>, ...).
 # Placeholders: <player>, <online>, and any %placeholderapi% placeholder.
 # Game sidebars live in each game's own config (sidebar: section).
+# Spectator sidebar, shown to arena spectators while the match is live
+# (features.spectator-tools). A game can replace it with a "spectating:" list
+# in its own sidebar section. Values: the game sidebar's (<time>, <map>, ...),
+# @teams: rows, and <watching>, <watching-kills>, <watching-deaths>,
+# <watching-assists> for the player you follow ("-" when nobody).
+spectator:
+  enabled: true
+  lines:
+    - "<secondary>Time:</secondary> <yellow><time></yellow>"
+    - "<muted>You are spectating</muted>"
+    - ""
+    - "@teams: <team-name><gray>:</gray> <white><team-score></white>"
+    - ""
+    - "<secondary>Watching:</secondary> <highlight><watching></highlight>"
+    - "<secondary>K/D/A:</secondary> <white><watching-kills>/<watching-deaths>/<watching-assists></white>"
+
 lobby:
   enabled: true
   title: "<primary><bold>Tea</bold></primary>"

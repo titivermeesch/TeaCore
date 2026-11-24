@@ -1,0 +1,27 @@
+# Settings home: /tea admin, then Settings. One entry per settings file on the
+# network (source settings-files): {file} {title} {hosts} (where it is) {note}.
+enabled: true
+permission: tea.settings
+title: "<primary>Settings"
+rows: 4
+pattern:
+  - "#########"
+  - "#FFFFFFF#"
+  - "#FFFFFFF#"
+  - "B#######X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'B': { material: ARROW, name: "<secondary>Back", action: "open-menu:admin" }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'F':
+    source: settings-files
+    item:
+      name: "<primary>{title}"
+      lore:
+        - "<secondary>On: <highlight>{hosts}"
+        - ""
+        - "<success>Click to open"
+        - "<warning>{note}"
+      actions: ["open-menu:admin-settings-file file={file}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>Nothing to edit" }

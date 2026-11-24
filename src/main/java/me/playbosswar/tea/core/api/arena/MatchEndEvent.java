@@ -9,13 +9,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Fired when a match in an {@link Arena} ends.
- *
- * <p>Emitted by {@link ArenaManager#endMatch(ArenaId, UUID)} or
- * {@link ArenaManager#endMatchForTeam(ArenaId, TeamId)} as the arena enters
- * {@link ArenaState#ENDING}, BEFORE participants are evacuated. Listeners can inspect
- * final state, record stats, or broadcast results while the arena is still populated. Not
- * cancellable.
+ * Fired when the arena enters {@link ArenaState#ENDING}, before participants
+ * are evacuated, so listeners still see the populated arena. Not cancellable.
  */
 public final class MatchEndEvent extends Event {
 
@@ -25,23 +20,11 @@ public final class MatchEndEvent extends Event {
     private final @Nullable UUID winnerUuid;
     private final @Nullable TeamId winningTeam;
 
-    /**
-     * Constructs a new match-end event.
-     *
-     * @param arena      arena whose match is ending; must not be {@code null}.
-     * @param winnerUuid uuid of the winning player, or {@code null} for a draw or no winner.
-     */
     public MatchEndEvent(Arena arena, @Nullable UUID winnerUuid) {
         this(arena, winnerUuid, null);
     }
 
-    /**
-     * Constructs a match-end event for a team result.
-     *
-     * @param arena       arena whose match is ending; must not be {@code null}.
-     * @param winnerUuid  a representative winning player, or {@code null}.
-     * @param winningTeam the winning team, or {@code null} for a draw or no winner.
-     */
+    /** @param winnerUuid a representative member of {@code winningTeam} for team results */
     public MatchEndEvent(Arena arena, @Nullable UUID winnerUuid, @Nullable TeamId winningTeam) {
         this.arena = arena;
         this.winnerUuid = winnerUuid;
@@ -49,50 +32,29 @@ public final class MatchEndEvent extends Event {
     }
 
     /**
-     * Returns the winning team when the match was ended with
-     * {@link ArenaManager#endMatchForTeam(ArenaId, TeamId)}. Every member of
-     * that team counts as a winner.
-     *
-     * @return the winning team, or empty for solo results, draws or no winner.
+     * Set when ended with {@link ArenaManager#endMatchForTeam(ArenaId, TeamId)};
+     * every member of the team counts as a winner. Empty for solo results, draws or
+     * no winner.
      */
     public Optional<TeamId> winningTeam() {
         return Optional.ofNullable(winningTeam);
     }
 
-    /**
-     * Returns the arena whose match is ending.
-     *
-     * @return the arena, never {@code null}.
-     */
     public Arena arena() {
         return arena;
     }
 
-    /**
-     * Returns the winning player's uuid if one was determined.
-     *
-     * @return the winner uuid, or empty for a draw or no winner.
-     */
+    /** Empty for a draw or no winner. For team results, one representative member. */
     public Optional<UUID> winner() {
         return Optional.ofNullable(winnerUuid);
     }
 
-    /**
-     * {@inheritDoc}
-     *
-     * @return the handler list for this event.
-     */
     @Override
     @NotNull
     public HandlerList getHandlers() {
         return HANDLERS;
     }
 
-    /**
-     * Returns the static handler list Bukkit uses to dispatch this event.
-     *
-     * @return the shared handler list, never {@code null}.
-     */
     public static HandlerList getHandlerList() {
         return HANDLERS;
     }

@@ -1,41 +1,24 @@
 package me.playbosswar.tea.core.api.coordination;
 
+import java.util.Map;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * A flat, serializable arena-or-match event broadcast to every backend on the
- * Tea network.
+ * Flat, serializable arena or match event broadcast to every server through
+ * {@link CoordinationBackend#publishEvent(CoordinationEvent)}. Each server
+ * mirrors its local Bukkit events into these; the lobby dashboard turns them
+ * into a live feed. Which nullable fields are set depends on {@link Type}.
  *
- * <p>
- * Each backend mirrors its local Bukkit events
- * ({@link me.playbosswar.tea.core.api.arena.ArenaStateChangeEvent},
- * {@link me.playbosswar.tea.core.api.arena.ArenaPlayerJoinEvent}, etc.) into
- * one of these via
- * {@link CoordinationBackend#publishEvent(CoordinationEvent)}, and the lobby's
- * dashboard subscribes via
- * {@link CoordinationBackend#subscribeEvents(java.util.function.Consumer)} to
- * push a network-wide live feed to the browser. The record is intentionally
- * flat so it serializes cleanly over Redis pub/sub without custom type
- * adapters; nullable fields reflect which facts are relevant per
- * {@link Type}.
- *
- * @param type                   event discriminator; never {@code null}.
- * @param serverId               the originating backend; never {@code null}.
- * @param arenaId                arena id for arena- and match-level events.
- * @param gameId                 game id for arena- and match-level events.
- * @param fromState              previous state for {@link Type#ARENA_STATE}.
- * @param toState                new state for {@link Type#ARENA_STATE}.
- * @param playerUuid             uuid for player join/leave events.
- * @param playerName             display name for player join/leave events.
- * @param spectator              whether the player joined as a spectator
- *                               ({@link Type#ARENA_PLAYER_JOIN}).
- * @param reason                 leave reason
- *                               ({@link Type#ARENA_PLAYER_LEAVE}).
- * @param winnerUuid             winner uuid on {@link Type#MATCH_END}.
- * @param playerCount            live participant count post-event.
- * @param phaseSecondsRemaining  phase timer remaining after transition
- *                               ({@link Type#ARENA_STATE}); {@code -1} when
- *                               not applicable.
+ * @param fromState             set for {@link Type#ARENA_STATE}
+ * @param toState               set for {@link Type#ARENA_STATE}
+ * @param spectator             set for {@link Type#ARENA_PLAYER_JOIN}
+ * @param reason                set for {@link Type#ARENA_PLAYER_LEAVE}
+ * @param winnerUuid            set for {@link Type#MATCH_END}
+ * @param playerCount           live participant count after the event
+ * @param phaseSecondsRemaining phase timer after an {@link Type#ARENA_STATE} transition; {@code -1} otherwise
+ * @param data                  extra facts for {@link Type#KILL} ({@code killer}, {@code killerName},
+ *                              {@code assists}, {@code cause}), {@link Type#CHAT} ({@code message})
+ *                              and {@link Type#SERVER_STATS}
  */
 public record CoordinationEvent(
         Type type,
@@ -50,12 +33,30 @@ public record CoordinationEvent(
         @Nullable String reason,
         @Nullable String winnerUuid,
         int playerCount,
-        int phaseSecondsRemaining) {
+        int phaseSecondsRemaining,
+        @Nullable Map<String, String> data) {
 
     public enum Type {
         ARENA_STATE,
         ARENA_PLAYER_JOIN,
         ARENA_PLAYER_LEAVE,
-        MATCH_END
+        MATCH_END,
+        /** A player died in a live arena; {@code playerUuid}/{@code playerName} is the victim. */
+        KILL,
+        /** A player in an arena sent a chat message; {@code playerUuid}/{@code playerName} is the sender. */
+        CHAT,
+        /**
+         * Sent by every server every 15 seconds for metrics. {@code data}: {@code tps},
+         * {@code mspt}, {@code players}, {@code memoryUsed}, {@code memoryMax} (bytes),
+         * {@code spareWorlds}; {@code playerCount} is the online player count.
+         */
+        SERVER_STATS,
+        /**
+         * The settings files this server can edit: {@code data.files} holds their
+         * schemas and current values as JSON.
+         */
+        SETTINGS,
+        /** A server saved maps or waiting rooms to the database; the others pull them. */
+        MAPS_CHANGED
     }
 }

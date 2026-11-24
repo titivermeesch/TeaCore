@@ -1,6 +1,5 @@
 package me.playbosswar.tea.core.impl.dashboard.dto;
 
-/** Serialized shape of a registered game for the dashboard. */
 public record GameSummaryDto(
         String id,
         String displayNameKey,
@@ -15,5 +14,7 @@ public record GameSummaryDto(
         int lifecycleMaxMatchSeconds,
         String endMode,
         String mapSelectionMode,
-        int mapCount) {
+        int mapCount,
+        /** Servers hosting this game; empty means this server. Settings above are only known for local games. */
+        java.util.List<String> hosts) {
 }

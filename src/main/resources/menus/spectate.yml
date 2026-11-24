@@ -1,0 +1,31 @@
+# Spectator teleporter: the players still in your match. Opened by the
+# spectator compass (features.spectator-tools). Per player: {uuid} {name}
+# {team} {health} {kills} {deaths} {assists}
+enabled: true
+title: "<primary>Watch a player"
+rows: 4
+pattern:
+  - "PPPPPPPPP"
+  - "PPPPPPPPP"
+  - "PPPPPPPPP"
+  - "###<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'P':
+    source: spectate-targets
+    item:
+      name: "<highlight>{name}"
+      lore:
+        - "<secondary>Team: <highlight>{team}"
+        - "<secondary>Health: <highlight>{health}"
+        - "<secondary>K/D/A: <highlight>{kills}/{deaths}/{assists}"
+        - ""
+        - "<success>Left-click: teleport to them"
+        - "<accent>Right-click: watch through their eyes"
+      left-actions: ["spectate-tp:{uuid}"]
+      right-actions: ["spectate-follow:{uuid}"]
+    empty: { material: BARRIER, name: "<muted>Nobody left to watch" }

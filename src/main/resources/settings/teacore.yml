@@ -1,0 +1,86 @@
+# Which parts of config.yml staff can change from /tea admin and the dashboard.
+# Setup values (network, Redis, database, dashboard) stay in the file.
+id: teacore
+title: TeaCore
+file: config.yml
+icon: BEACON
+apply: live
+categories:
+  - id: features
+    title: Features
+    icon: LEVER
+    fields:
+      - { path: features.sidebar, type: boolean, title: Match sidebar, help: "The sidebar during matches." }
+      - { path: features.lobby-sidebar, type: boolean, title: Lobby sidebar }
+      - { path: features.menus, type: boolean, title: Menus, help: "Turns off every chest menu, including this one." }
+      - { path: features.queue-bossbar, type: boolean, title: Queue boss bar, help: "Shows queued players their place in the queue." }
+      - { path: features.lobby-hotbar, type: boolean, title: Lobby hotbar }
+      - { path: features.match-history, type: boolean, title: Match history, help: "Stores finished matches for /profile and the dashboard." }
+      - { path: features.map-editor-tools, type: boolean, title: Map editor tools, help: "The wand, point tool and checklist while editing a map." }
+      - { path: features.spectator-tools, type: boolean, title: Spectator tools }
+      - { path: features.map-voting, type: boolean, title: Map voting }
+      - { path: features.waiting-protection, type: boolean, title: Waiting protection, help: "Nobody takes damage before the match starts." }
+      - { path: features.kit-item, type: boolean, title: Kit item, help: "The item that opens the kit picker while waiting." }
+      - { path: features.leave-item, type: boolean, title: Leave item }
+      - { path: features.ranked, type: boolean, title: Ranked play }
+      - { path: features.quests, type: boolean, title: Quests }
+      - { path: features.placeholders, type: boolean, title: PlaceholderAPI, apply: restart }
+  - id: arenas
+    title: Arenas
+    icon: GRASS_BLOCK
+    fields:
+      - { path: arena-pool.spare-worlds, type: int, min: 0, max: 20, title: Spare worlds, help: "Empty worlds kept ready so a new arena opens without waiting." }
+      - { path: arena-pool.scale-down-idle-seconds, type: int, min: 10, max: 3600, step: 10, title: Close empty arenas after, help: "Seconds an extra arena may sit empty before it closes." }
+      - { path: maps.keep-versions, type: int, min: 0, max: 100, title: Map versions kept, help: "Older versions of each map you can roll back to." }
+  - id: items
+    title: Waiting items
+    icon: NETHER_STAR
+    fields:
+      - { path: kit-item.material, type: material, title: Kit item }
+      - { path: kit-item.hotbar-slot, type: int, min: 0, max: 8, title: Kit item slot }
+      - { path: leave-item.material, type: material, title: Leave item }
+      - { path: leave-item.hotbar-slot, type: int, min: 0, max: 8, title: Leave item slot }
+      - { path: map-voting.options, type: int, min: 2, max: 9, title: Maps per vote, help: "The loaded map plus random others." }
+      - { path: map-voting.hotbar-slot, type: int, min: 0, max: 8, title: Vote item slot }
+  - id: lobby
+    title: Lobby
+    icon: COMPASS
+    fields:
+      - { path: lobby.pvp, type: boolean, title: PvP in the lobby }
+      - { path: lobby.manage-spawn, type: boolean, title: Send players to the lobby spawn, apply: restart }
+      - { path: lobby.gamemode, type: enum, options: [ADVENTURE, SURVIVAL, CREATIVE, SPECTATOR], title: Lobby game mode, apply: restart }
+  - id: parties
+    title: Parties
+    icon: CAKE
+    fields:
+      - { path: parties.enabled, type: boolean, title: Use party plugins, help: "Parties or Party and Friends." }
+      - { path: parties.leader-only, type: boolean, title: Only the leader can queue }
+  - id: ranked
+    title: Ranked
+    icon: DIAMOND
+    fields:
+      - { path: ranked.start-rating, type: int, min: 0, max: 10000, step: 50, title: Starting rating }
+      - { path: ranked.k-factor, type: int, min: 1, max: 100, title: Rating change per match, help: "The most a single match moves a rating." }
+      - { path: ranked.range, type: int, min: 0, max: 2000, step: 10, title: Matching range, help: "How far apart ratings in one ranked arena may be." }
+      - { path: ranked.widen-per-10s, type: int, min: 0, max: 500, step: 10, title: Range growth per 10 seconds }
+      - { path: ranked.max-range, type: int, min: 0, max: 5000, step: 50, title: Largest range }
+  - id: combat
+    title: Combat
+    icon: IRON_SWORD
+    fields:
+      - { path: combat.kill-credit-window-ms, type: int, min: 0, max: 60000, step: 500, title: Kill credit window (ms), help: "How long after a hit you still get the kill." }
+      - { path: combat.assist-window-ms, type: int, min: 0, max: 60000, step: 500, title: Assist window (ms) }
+  - id: history
+    title: History and leaderboards
+    icon: BOOK
+    fields:
+      - { path: match-history.keep-days, type: int, min: 0, max: 3650, step: 10, title: Keep matches for (days), help: "0 keeps them forever.", apply: restart }
+      - { path: leaderboards.refresh-seconds, type: int, min: 10, max: 3600, step: 10, title: Leaderboard refresh (seconds), apply: restart }
+  - id: discord
+    title: Discord
+    icon: BELL
+    fields:
+      - { path: discord.match-results.url, type: text, secret: true, title: Match results webhook }
+      - { path: discord.staff-actions.url, type: text, secret: true, title: Staff actions webhook }
+      - { path: discord.achievements.url, type: text, secret: true, title: Achievements webhook }
+      - { path: discord.server-status.url, type: text, secret: true, title: Server status webhook }

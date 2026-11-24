@@ -13,15 +13,7 @@ import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.stats.StatsProvider;
 import me.playbosswar.tea.core.api.stats.StatsSchema;
 
-/**
- * Generic provider that runs a {@link StatsSchema}'s SELECT against the shared
- * database. Used on lobbies (where the game-owning provider class isn't loaded)
- * and as a fallback whenever a schema exists for a game but no in-process
- * provider has been registered for it.
- *
- * <p>Table and column names come from a schema written by the game plugin, so
- * they are not user-controlled — concatenating them into the SQL is safe.
- */
+/** Table and column names come from a game plugin's schema, not user input, so concatenating them into SQL is safe. */
 public final class DbStatsProvider implements StatsProvider {
 
     private final StatsSchema schema;

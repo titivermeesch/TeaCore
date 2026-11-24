@@ -14,6 +14,7 @@ import org.jetbrains.annotations.Nullable;
  * <pre>
  * enabled: true
  * permission: ""             # optional; needed to open it with /menu
+ * bedrock: true              # Bedrock players (Floodgate) get it as a form; false = chest
  * title: "&lt;primary&gt;Play"
  * rows: 4
  * refresh-ticks: 20          # re-render while open (0 = never)
@@ -33,9 +34,10 @@ import org.jetbrains.annotations.Nullable;
  * Item keys: {@code material}, {@code name}, {@code lore}, {@code amount},
  * {@code glow}, {@code view-if}, {@code skull-owner}, {@code custom-model-data},
  * and actions as {@code action}/{@code actions} (any click) or
- * {@code left-actions}/{@code right-actions}/{@code shift-actions}.
+ * {@code left-actions}/{@code right-actions}/{@code shift-actions}, and the more
+ * specific {@code shift-left-actions}/{@code shift-right-actions}.
  */
-record MenuDef(boolean enabled, @Nullable String permission, String title, int rows, int refreshTicks, List<String> pattern,
+record MenuDef(boolean enabled, @Nullable String permission, boolean bedrock, String title, int rows, int refreshTicks, List<String> pattern,
                Map<Character, ItemDef> items, Map<Character, ListDef> lists) {
 
     char charAt(int slot) {
@@ -72,19 +74,20 @@ record MenuDef(boolean enabled, @Nullable String permission, String title, int r
                 }
             }
         }
-        return new MenuDef(yaml.getBoolean("enabled", true), yaml.getString("permission"), yaml.getString("title", ""), rows,
+        return new MenuDef(yaml.getBoolean("enabled", true), yaml.getString("permission"),
+                yaml.getBoolean("bedrock", true), yaml.getString("title", ""), rows,
                 Math.max(0, yaml.getInt("refresh-ticks", 0)), List.copyOf(yaml.getStringList("pattern")),
                 Map.copyOf(items), Map.copyOf(lists));
     }
 
-    /** A list area: entries from {@code source}, each drawn with {@code item}. */
     record ListDef(String source, ItemDef item, @Nullable ItemDef empty) { }
 
     /** One item template. Text fields may contain {placeholders}, theme tags and %papi%. */
     record ItemDef(String material, @Nullable String name, List<String> lore, @Nullable String amount,
                    @Nullable String glow, @Nullable String viewIf, @Nullable String skullOwner,
                    @Nullable Integer customModelData, List<String> actions, List<String> leftActions,
-                   List<String> rightActions, List<String> shiftActions, boolean showWithoutHistory) {
+                   List<String> rightActions, List<String> shiftActions, List<String> shiftLeftActions,
+                   List<String> shiftRightActions, boolean showWithoutHistory) {
 
         static ItemDef parse(ConfigurationSection s) {
             return new ItemDef(
@@ -100,6 +103,8 @@ record MenuDef(boolean enabled, @Nullable String permission, String title, int r
                     actionList(s, null, "left-actions"),
                     actionList(s, null, "right-actions"),
                     actionList(s, null, "shift-actions"),
+                    actionList(s, null, "shift-left-actions"),
+                    actionList(s, null, "shift-right-actions"),
                     s.getBoolean("show-without-history", false));
         }
 
@@ -116,8 +121,19 @@ record MenuDef(boolean enabled, @Nullable String permission, String title, int r
             return List.copyOf(out);
         }
 
-        /** The actions for a click: the specific list if set, else the generic one. */
+        boolean clickable() {
+            return !(actions.isEmpty() && leftActions.isEmpty() && rightActions.isEmpty() && shiftActions.isEmpty()
+                    && shiftLeftActions.isEmpty() && shiftRightActions.isEmpty());
+        }
+
+        /** The specific list if set, else the generic one. */
         List<String> actionsFor(ClickType click) {
+            if (click == ClickType.SHIFT_LEFT && !shiftLeftActions.isEmpty()) {
+                return shiftLeftActions;
+            }
+            if (click == ClickType.SHIFT_RIGHT && !shiftRightActions.isEmpty()) {
+                return shiftRightActions;
+            }
             if (click.isShiftClick() && !shiftActions.isEmpty()) {
                 return shiftActions;
             }

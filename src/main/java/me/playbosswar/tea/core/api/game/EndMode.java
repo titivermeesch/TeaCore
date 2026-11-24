@@ -1,17 +1,12 @@
 package me.playbosswar.tea.core.api.game;
 
-import me.playbosswar.tea.core.api.arena.Arena;
 import me.playbosswar.tea.core.api.arena.ArenaState;
+import me.playbosswar.tea.core.api.arena.Arena;
 
-/**
- * What an {@link Arena} should do after its match has ended.
- *
- * <p>Chosen per game as part of {@link GameDefinition} and consulted by the lifecycle
- * ticker after {@link ArenaState#ENDING}.
- */
+/** What an {@link Arena} does after {@link ArenaState#ENDING}. */
 public enum EndMode {
-    /** Drain players back to lobby, rollback map, return arena to waiting. */
+    /** Sends players to the lobby, rolls back the map and returns the arena to waiting. */
     RESET,
-    /** Drain players back to lobby, then shut the server down (e.g. k8s pod rotation). */
+    /** Sends players to the lobby, then shuts the server down (e.g. for pod rotation). */
     SHUTDOWN
 }

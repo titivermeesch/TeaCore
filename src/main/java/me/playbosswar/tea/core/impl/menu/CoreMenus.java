@@ -3,7 +3,6 @@ package me.playbosswar.tea.core.impl.menu;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import me.playbosswar.tea.core.api.TeaCoreAPI;
@@ -18,17 +17,6 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
-/**
- * TeaCore's own menu sources and actions:
- * <ul>
- *   <li>source {@code kits} (arg {@code game}): every kit of a game with its
- *       name, description, price line, and {@code selected}/{@code locked} flags;</li>
- *   <li>action {@code kit-select:<game> <kit>}: buys the kit if needed (Vault),
- *       selects it and refreshes the menu;</li>
- *   <li>source {@code stats-games} (arg {@code target_uuid}): one entry per game
- *       with a stats schema, its stat lines in {@code {lines}}.</li>
- * </ul>
- */
 public final class CoreMenus {
 
     private final TeaCoreAPI core;
@@ -94,7 +82,6 @@ public final class CoreMenus {
         return out;
     }
 
-    /** Buys (if needed) and selects a kit, with the same rules and messages as /kit. */
     public void selectKit(Player player, GameId game, String kitId) {
         Kit kit = core.kits().kit(game, kitId).orElse(null);
         if (kit == null) {
@@ -147,11 +134,28 @@ public final class CoreMenus {
                         "core.stats.gui.game.entry", Map.of("label", label, "value", value))));
             }
             String name = display.name(locale, schema.gameId());
-            out.add(MenuEntry.of(Map.of(
-                    "game_id", schema.gameId().value(),
-                    "game_name", name,
-                    "lines", String.join("\n", lines),
-                    "has_data", String.valueOf(entries != null && !entries.isEmpty()))));
+            String rating = "-";
+            String rank = "-";
+            var ratings = core instanceof me.playbosswar.tea.core.impl.TeaCorePlugin tc ? tc.ratings() : null;
+            if (ratings != null && ratings.enabled(schema.gameId())) {
+                var r = ratings.read(target, schema.gameId());
+                if (r.games() > 0) {
+                    rating = String.valueOf(r.rating());
+                    int place = ratings.rank(target, schema.gameId());
+                    rank = place > 0 ? String.valueOf(place) : "-";
+                    lines.add(ms.renderLegacyNoPrefix(locale, "core.stats.gui.game.rating",
+                            Map.of("rating", rating, "rank", rank, "wins", String.valueOf(r.wins()),
+                                    "losses", String.valueOf(r.losses()))));
+                }
+            }
+            Map<String, String> values = new HashMap<>();
+            values.put("game_id", schema.gameId().value());
+            values.put("game_name", name);
+            values.put("lines", String.join("\n", lines));
+            values.put("has_data", String.valueOf(entries != null && !entries.isEmpty()));
+            values.put("rating", rating);
+            values.put("rank", rank);
+            out.add(MenuEntry.of(values));
         }
         return out;
     }

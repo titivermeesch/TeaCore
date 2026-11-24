@@ -54,11 +54,8 @@ public final class ThemeImpl implements Theme {
     }
 
     /**
-     * Parse a MiniMessage template like {@code <#5fd1ff>} or {@code <bold><white>} and
-     * collapse its applied styles into a single {@link Style} that can back a styling tag.
-     * Registering the style slot as a styling tag (rather than a parsed placeholder) is what
-     * lets {@code <primary>text</primary>} render correctly, with the close tag
-     * popping back to the parent style instead of leaking as literal text.
+     * Registered as a styling tag rather than a placeholder so {@code <primary>text</primary>}
+     * closes back to the parent style instead of leaking as literal text.
      */
     private static Style extractStyle(MiniMessage mm, String template) {
         Component root = mm.deserialize(template + "x");

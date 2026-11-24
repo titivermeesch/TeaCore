@@ -10,7 +10,6 @@ import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.map.MapDefinition;
 import me.playbosswar.tea.core.api.map.MapExtensionRegistry;
 import me.playbosswar.tea.core.api.map.MapService;
-import org.bukkit.Bukkit;
 import org.bukkit.World;
 
 public final class MapServiceImpl implements MapService {
@@ -29,7 +28,6 @@ public final class MapServiceImpl implements MapService {
         return extensions;
     }
 
-    /** Provides typed access to the concrete registry for internal code paths. */
     public MapExtensionRegistryImpl extensionRegistry() {
         return extensions;
     }
@@ -73,21 +71,18 @@ public final class MapServiceImpl implements MapService {
     public void paste(MapDefinition definition, World world) {
         if (definition.schematic().isEmpty())
             return;
-        if (!worldEditAvailable()) {
-            logger.warning("WorldEdit/FAWE not enabled; skipping paste for " + definition.mapId()
-                    + ". Arenas will use empty void worlds. Install WorldEdit or FastAsyncWorldEdit to enable schematic pasting.");
+        SchematicStore store = SchematicStore.current();
+        if (!store.available()) {
+            logger.warning("Skipping paste for " + definition.mapId() + ": " + store.unavailableReason()
+                    + " Arenas will use empty void worlds.");
             return;
         }
         try {
-            WorldEditPaster.paste(definition.schematicFile(), world, 0, 64, 0);
+            store.paste(definition.schematicFile(), world, 0, 64, 0);
             logger.info("Pasted map " + definition.mapId() + " into " + world.getName());
         } catch (Throwable t) {
             logger.log(Level.SEVERE, "Failed to paste map " + definition.mapId(), t);
         }
     }
 
-    private boolean worldEditAvailable() {
-        return Bukkit.getPluginManager().isPluginEnabled("WorldEdit")
-                || Bukkit.getPluginManager().isPluginEnabled("FastAsyncWorldEdit");
-    }
 }

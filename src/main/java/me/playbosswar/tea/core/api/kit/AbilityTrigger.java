@@ -1,28 +1,21 @@
 package me.playbosswar.tea.core.api.kit;
 
 /**
- * Input events that can fire an {@link Ability} via an {@link AbilityBinding}.
- *
- * <p>
- * Click triggers match only when the ability's binding item is held; non-click
- * triggers
- * fire regardless of the held item.
+ * Input that fires an {@link Ability} through an {@link AbilityBinding}. Click
+ * triggers require the ability's bound item to be held; the others fire
+ * regardless of the held item.
  */
 public enum AbilityTrigger {
-    /** Player right-clicked while holding the ability's bound item. */
     RIGHT_CLICK_ITEM,
-    /** Player left-clicked while holding the ability's bound item. */
     LEFT_CLICK_ITEM,
-    /** Player began crouching. */
+    /** Player began sneaking. */
     SHIFT_PRESS,
-    /** Player stopped crouching. */
+    /** Player stopped sneaking. */
     SHIFT_RELEASE,
-    /** Player jumped (left the ground by jumping). */
     JUMP,
-    /** Player took damage. */
     DAMAGE_TAKEN,
     /** Player killed another entity. */
     KILL,
-    /** Ability is passive and fires on a continuous tick or on kit application. */
+    /** Fires on a continuous tick or when the kit is applied. */
     PASSIVE
 }

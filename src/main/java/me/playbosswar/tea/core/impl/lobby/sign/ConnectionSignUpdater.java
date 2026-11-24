@@ -9,11 +9,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
-import org.bukkit.block.sign.Side;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
-/** Re-renders sign text every second from the current arena snapshots. */
 public final class ConnectionSignUpdater {
 
     private final Plugin plugin;
@@ -52,9 +50,9 @@ public final class ConnectionSignUpdater {
                 continue;
 
             List<String> lines = renderLines(sign);
-            var side = signState.getSide(Side.FRONT);
+            // setLine writes the front side on 1.20+ and the only side before.
             for (int i = 0; i < lines.size() && i < 4; i++) {
-                side.setLine(i, lines.get(i));
+                signState.setLine(i, lines.get(i));
             }
             signState.update();
         }
@@ -76,9 +74,6 @@ public final class ConnectionSignUpdater {
                 availableArenas++;
         }
 
-        // Use the authored display name when the sign targets a specific map
-        // and a MapDefinition is loaded locally; otherwise fall back to the raw
-        // filter string (or "any" for any-map signs).
         String mapDisplay;
         if (sign.acceptsAnyMap()) {
             mapDisplay = "any";

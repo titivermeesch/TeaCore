@@ -1,157 +1,168 @@
 package me.playbosswar.tea.core.api.map;
 
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import me.playbosswar.tea.core.api.game.GameId;
+import org.bukkit.Color;
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * A game-owned extension to the generic {@link MapDefinition} shape.
+ * Game-owned data attached to a {@link MapDefinition}. Register it on enable
+ * with {@link MapExtensionRegistry#register(MapExtension)}.
  *
  * <p>
- * Extensions let games attach arbitrary data to a map without polluting the
- * core model. They are registered on plugin enable via
- * {@link MapExtensionRegistry#register(MapExtension)} and participate in three
- * flows:
- *
- * <ul>
- * <li><b>Authoring.</b> TeaCore dispatches {@code /tea map <subcommand> ...}
- * to {@link #handleCommand} when the admin runs it inside their active draft;
- * the handler reads the player's position/args and mutates the draft through
- * the supplied {@link MapDraftHandle}.</li>
- * <li><b>Persistence.</b> TeaCore calls {@link #toYaml} to serialize the
- * stored value under {@code extensions.<id>} in the map YAML file, and
- * {@link #fromYaml} to reconstruct it on load.</li>
- * <li><b>Lookup.</b> Game code reads the value back with
- * {@link MapDefinition#extension(MapExtensionKey)}.</li>
- * </ul>
+ * TeaCore routes {@code /tea map <subcommand>} to {@link #handleCommand},
+ * stores the value under {@code extensions.<id>} in the map YAML via
+ * {@link #toYaml}/{@link #fromYaml}, and game code reads it back with
+ * {@link MapDefinition#extension(MapExtensionKey)}.
  *
  * <p>
- * If the extension carries spatial coordinates that should survive the
- * edit-world to paste-origin relocation, override
- * {@link #toRelative(Object, int, int, int)} and
- * {@link #toAbsolute(Object, int, int, int)}. TeaCore calls them as it moves
- * data between the live edit world (absolute) and the saved definition
- * (relative to the region min-corner). The default implementations are
- * identity; non-spatial extensions can ignore them.
+ * Extensions holding coordinates should override {@link #toRelative} and
+ * {@link #toAbsolute}: drafts hold absolute edit-world positions, saved
+ * definitions hold positions relative to the region min-corner. The defaults
+ * are identity.
  *
  * @param <T> the extension's value type.
  */
 public interface MapExtension<T> {
 
-    /**
-     * Returns the typed key used to identify and look up this extension.
-     *
-     * @return the key, never {@code null}.
-     */
     MapExtensionKey<T> key();
 
     /**
-     * Returns the admin subcommand for this extension - the token admins type
-     * after {@code /tea map}. For example, returning {@code "evolutionviewer"}
-     * wires the extension to {@code /tea map evolutionviewer ...}.
-     *
-     * <p>
-     * Subcommands are matched case-insensitively and must not collide with any
-     * built-in TeaCore map subcommand.
-     *
-     * @return the subcommand token, never {@code null}.
+     * The token after {@code /tea map} that routes to this extension. Matched
+     * case-insensitively; must not collide with a built-in map subcommand.
      */
     String subcommand();
 
     /**
-     * Indicates whether a map draft must have a value for this extension to be
-     * save-able. When {@code true} the admin sees the missing entry in
-     * {@code /tea map status} and cannot {@code /tea map save} until it is
-     * filled.
-     *
-     * @return {@code true} if required; default {@code false}.
+     * When {@code true}, {@code /tea map save} is blocked until the draft has a
+     * value for this extension.
      */
     default boolean required() {
         return false;
     }
 
-    /**
-     * Returns a short label used in {@code /tea map status} output. Defaults
-     * to the extension id.
-     *
-     * @return a short label for status rendering, never {@code null}.
-     */
+    /** Label shown in {@code /tea map status}. Defaults to the extension id. */
     default String statusLabel() {
         return key().id();
     }
 
     /**
-     * Handles {@code /tea map <subcommand> [args...]}.
+     * Called only when the player has an active draft and is standing in its
+     * edit world.
      *
-     * <p>
-     * Called only when the player has an active draft and is standing in that
-     * draft's edit world. Implementations mutate the draft via {@code handle}.
-     *
-     * @param player player running the command; never {@code null}.
-     * @param handle typed handle into the active draft, scoped to this
-     *               extension's value; never {@code null}.
-     * @param args   raw command args after the subcommand token (so for
-     *               {@code /tea map evolutionviewer foo bar} this is
-     *               {@code ["foo", "bar"]}); never {@code null}.
+     * @param args the arguments after the subcommand token.
      */
     void handleCommand(Player player, MapDraftHandle<T> handle, String[] args);
 
     /**
-     * Reconstructs a value from its YAML representation written earlier by
-     * {@link #toYaml}.
-     *
-     * @param source the YAML subsection at {@code extensions.<id>} (read-only
-     *               view for this call); never {@code null}.
-     * @return the parsed value; extensions may return {@code null} to indicate
-     *         a malformed entry, in which case TeaCore logs and skips.
+     * @param source the {@code extensions.<id>} section.
+     * @return the value, or {@code null} for a malformed entry, which TeaCore
+     *         logs and skips.
      */
     T fromYaml(ConfigurationSection source);
 
     /**
-     * Serializes a value into the given YAML subsection.
-     *
-     * @param value  the value to persist; never {@code null}.
-     * @param target an empty configuration section at {@code extensions.<id>};
-     *               never {@code null}.
+     * @param target an empty section at {@code extensions.<id>}.
      */
     void toYaml(T value, ConfigurationSection target);
 
     /**
-     * Converts an authoring-time (absolute-in-edit-world) value to a saved
-     * (relative-to-min-corner) value. Default: identity.
-     *
-     * @param absolute value as held on the active draft.
-     * @param minX     min-corner X in edit-world blocks.
-     * @param minY     min-corner Y in edit-world blocks.
-     * @param minZ     min-corner Z in edit-world blocks.
-     * @return the value to write into the {@link MapDefinition}.
+     * Converts a draft value (absolute edit-world coordinates) to a saved value
+     * relative to the region min-corner.
      */
     default T toRelative(T absolute, int minX, int minY, int minZ) {
         return absolute;
     }
 
     /**
-     * Converts a saved (relative-to-min-corner) value back to an authoring
-     * (absolute-in-edit-world) value when the admin reopens a map with
-     * {@code /tea map edit}. Default: identity.
-     *
-     * @param relative stored value.
-     * @param originX  edit-world paste-origin X.
-     * @param originY  edit-world paste-origin Y.
-     * @param originZ  edit-world paste-origin Z.
-     * @return the value to load into the draft.
+     * Converts a saved value back to absolute edit-world coordinates when a map
+     * is reopened with {@code /tea map edit}.
      */
     default T toAbsolute(T relative, int originX, int originY, int originZ) {
         return relative;
     }
 
-    /**
-     * Renders a value for the {@code /tea map status} line. Defaults to
-     * {@link Object#toString()}.
-     *
-     * @param value the value to describe; never {@code null}.
-     * @return a one-line description.
-     */
+    /** One-line rendering for {@code /tea map status}. */
     default String describeValue(T value) {
         return String.valueOf(value);
+    }
+
+    /**
+     * The game this extension belongs to. Map validation, status, the setup
+     * sidebar and the editor tools only use extensions that apply to the
+     * draft's game.
+     *
+     * <p>
+     * Defaults to the key id prefix before the first {@code ':'}
+     * ({@code "ascend:evolution-mob"} belongs to {@code ascend}). Empty means
+     * the extension applies to every game.
+     */
+    default Optional<GameId> game() {
+        String id = key().id();
+        int colon = id.indexOf(':');
+        if (colon <= 0) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(GameId.of(id.substring(0, colon).toLowerCase(Locale.ROOT)));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** {@code true} when {@link #game()} is empty or equals {@code gameId}. */
+    default boolean appliesTo(GameId gameId) {
+        return game().map(gameId::equals).orElse(true);
+    }
+
+    /**
+     * Points shown as particle markers in the map editor, in index order and in
+     * the same coordinate space as {@code value}. Defaults to none.
+     */
+    default List<SpawnPoint> points(T value) {
+        return List.of();
+    }
+
+    /**
+     * Removes the point at {@code index} (as returned by {@link #points}).
+     *
+     * @return the new value, or {@code null} to clear the extension.
+     */
+    default @Nullable T removePoint(T value, int index) {
+        return null;
+    }
+
+    /**
+     * Places a point with the editor's point tool. Return {@code null} if
+     * placement by position is unsupported; the tool then calls
+     * {@link #handleCommand} with no arguments instead.
+     *
+     * @param current the current value, or {@code null} when unset.
+     * @param point   absolute in the edit world.
+     */
+    default @Nullable T placePoint(@Nullable T current, SpawnPoint point) {
+        return null;
+    }
+
+    /**
+     * {@code false} places a point on top of the right-clicked block (where a
+     * player stands); {@code true} places it on the block itself, for points
+     * that mark a block such as a chest.
+     */
+    default boolean pointOnClickedBlock() {
+        return false;
+    }
+
+    default Material editorIcon() {
+        return Material.PAPER;
+    }
+
+    default Color markerColor() {
+        return Color.WHITE;
     }
 }

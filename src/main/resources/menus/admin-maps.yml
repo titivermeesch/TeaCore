@@ -1,0 +1,39 @@
+# Maps of a game on this server (argument: game). Per map: {game} {game_name}
+# {map_id} {map_name} {spawns} {min} {max} {points} (game point types set)
+# {arenas} (running on it) {editable} (the game runs on this server)
+enabled: true
+permission: tea.map.admin
+title: "<primary>Maps"
+rows: 6
+pattern:
+  - "MMMMMMMMM"
+  - "MMMMMMMMM"
+  - "MMMMMMMMM"
+  - "MMMMMMMMM"
+  - "MMMMMMMMM"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'M':
+    source: admin-maps
+    item:
+      name: "<primary>{map_name} <muted>({map_id})"
+      lore:
+        - "<secondary>Players: <highlight>{min}-{max}"
+        - "<secondary>Spawns: <highlight>{spawns} <muted>| other point types: {points}"
+        - "<secondary>Arenas running: <highlight>{arenas}"
+        - ""
+        - "<success>Left-click: allocate an arena"
+        - "<secondary>Right-click: edit"
+        - "<accent>Shift + right-click: older versions"
+        - "<error>Shift + left-click: delete"
+      left-actions: ["admin-allocate:{game} {map_id}", "sound:UI_BUTTON_CLICK"]
+      right-actions: ["admin-map-edit:{game} {map_id}"]
+      shift-left-actions: ["confirm:Delete map {map_id}?|admin-map-delete:{game} {map_id}"]
+      shift-right-actions: ["open-menu:admin-map-versions game={game} map={map_id}"]
+    empty: { material: BARRIER, name: "<muted>No maps for this game on this server" }

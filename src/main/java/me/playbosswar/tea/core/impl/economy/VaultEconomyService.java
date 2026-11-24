@@ -10,16 +10,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
-/**
- * {@link EconomyService} that proxies every operation through Vault. TeaCore
- * owns no balance storage — whichever plugin has registered a Vault
- * {@link Economy} service is the source of truth.
- *
- * <p>
- * The Vault provider is resolved once at construction. If no provider is
- * available at that point, {@link #isAvailable()} returns {@code false} and
- * every mutating call becomes a silent no-op that returns {@code false}.
- */
+/** The Vault provider is resolved once at construction; without one, mutating calls are no-ops that return false. */
 public final class VaultEconomyService implements EconomyService {
 
     private final Logger logger;

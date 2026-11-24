@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Layers, MapPin, RefreshCw, Timer, Trash2, UsersRound } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
+import { History, Layers, MapPin, RefreshCw, RotateCcw, Timer, Trash2, UsersRound } from 'lucide-react';
 import { api, apiDelete, apiPost } from '../api';
+import { P, useCan } from '../auth';
 import type { GameSummary, MapInfo } from '../types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -8,6 +9,7 @@ import { Button } from '../components/ui/Button';
 import { Table, Tbody, Td, Th, Thead, Tr } from '../components/ui/Table';
 
 export default function Games() {
+    const canReload = useCan(P.mapsReload);
     const [games, setGames] = useState<GameSummary[] | null>(null);
     const [maps, setMaps] = useState<Record<string, MapInfo[]>>({});
     const [error, setError] = useState<string | null>(null);
@@ -44,7 +46,7 @@ export default function Games() {
     }
 
     async function deleteMap(gameId: string, mapId: string) {
-        if (!window.confirm(`Delete map ${gameId}/${mapId}? The schematic file is removed too.`)) {
+        if (!window.confirm(`Delete map ${gameId}/${mapId}? A backup is kept, so you can restore it with /tea map restore.`)) {
             return;
         }
         try {
@@ -62,10 +64,12 @@ export default function Games() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-semibold">Games</h1>
-                <Button onClick={reloadAllMaps} disabled={reloading}>
-                    <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
-                    {reloading ? 'Reloading...' : 'Reload maps'}
-                </Button>
+                {canReload && (
+                    <Button onClick={reloadAllMaps} disabled={reloading}>
+                        <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
+                        {reloading ? 'Reloading...' : 'Reload maps'}
+                    </Button>
+                )}
             </div>
             {error && (
                 <Card className="border-error/40">
@@ -82,6 +86,7 @@ export default function Games() {
                             game={g}
                             maps={maps[g.id] ?? []}
                             onDeleteMap={(mapId) => deleteMap(g.id, mapId)}
+                            onRestored={refresh}
                         />
                     ))}
                 </div>
@@ -94,11 +99,15 @@ function GameCard({
     game,
     maps,
     onDeleteMap,
+    onRestored,
 }: {
     game: GameSummary;
     maps: MapInfo[];
     onDeleteMap: (mapId: string) => void;
+    onRestored: () => void;
 }) {
+    const canDelete = useCan(P.mapsDelete);
+    const [openMap, setOpenMap] = useState<string | null>(null);
     return (
         <Card>
             <CardHeader>
@@ -107,11 +116,24 @@ function GameCard({
                         <CardTitle className="font-mono">{game.id}</CardTitle>
                         <CardDescription>{game.displayNameKey}</CardDescription>
                     </div>
-                    <Badge variant="muted">{game.teamMode}</Badge>
+                    <Badge variant="muted">{game.hosts.length > 0 ? 'remote' : game.teamMode}</Badge>
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                {game.hosts.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <KV icon={<Layers />} label="Hosted on">
+                        {game.hosts.join(', ')}
+                    </KV>
+                    <KV icon={<UsersRound />} label="Pool">
+                        {game.poolMaxTotal > 0 ? `min ${game.poolMinAvailable} · max ${game.poolMaxTotal}` : 'game defaults'}
+                    </KV>
+                    <KV icon={<MapPin />} label="Maps">
+                        {game.mapCount}
+                    </KV>
+                </div>
+                ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <KV icon={<Timer />} label="Waiting">
                         max {game.lifecycleMaxWaitSeconds}s
                     </KV>
@@ -137,6 +159,7 @@ function GameCard({
                         {game.mapCount}
                     </KV>
                 </div>
+                )}
                 {maps.length > 0 && (
                     <div className="border-t border-border -mx-5 px-5 pt-3">
                         <Table>
@@ -151,7 +174,8 @@ function GameCard({
                             </Thead>
                             <Tbody>
                                 {maps.map((m) => (
-                                    <Tr key={m.mapId}>
+                                    <Fragment key={m.mapId}>
+                                    <Tr>
                                         <Td className="font-medium">{m.mapId}</Td>
                                         <Td className="tabular-nums">{m.participantSpawnCount}</Td>
                                         <Td className="tabular-nums">
@@ -160,16 +184,33 @@ function GameCard({
                                         <Td className="text-xs text-muted">
                                             {m.extensions.length > 0 ? m.extensions.join(', ') : '-'}
                                         </Td>
-                                        <Td className="text-right">
+                                        <Td className="text-right whitespace-nowrap space-x-1">
                                             <Button
-                                                variant="danger"
-                                                title="Delete map"
-                                                onClick={() => onDeleteMap(m.mapId)}
+                                                variant="ghost"
+                                                title="Older versions"
+                                                onClick={() => setOpenMap(openMap === m.mapId ? null : m.mapId)}
                                             >
-                                                <Trash2 className="h-4 w-4" />
+                                                <History className="h-4 w-4" />
                                             </Button>
+                                            {canDelete && (
+                                                <Button
+                                                    variant="danger"
+                                                    title="Delete map"
+                                                    onClick={() => onDeleteMap(m.mapId)}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            )}
                                         </Td>
                                     </Tr>
+                                    {openMap === m.mapId && (
+                                        <Tr>
+                                            <Td colSpan={5}>
+                                                <MapVersions gameId={game.id} mapId={m.mapId} onRestored={onRestored} />
+                                            </Td>
+                                        </Tr>
+                                    )}
+                                    </Fragment>
                                 ))}
                             </Tbody>
                         </Table>
@@ -177,6 +218,61 @@ function GameCard({
                 )}
             </CardContent>
         </Card>
+    );
+}
+
+type MapVersion = { number: number; when: string; actor: string; reason: string };
+
+function MapVersions({ gameId, mapId, onRestored }: { gameId: string; mapId: string; onRestored: () => void }) {
+    const canRestore = useCan(P.mapsRestore);
+    const [versions, setVersions] = useState<MapVersion[] | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+
+    const load = useCallback(() => {
+        api<MapVersion[]>(`/api/maps/${gameId}/${mapId}/versions`)
+            .then(setVersions)
+            .catch((err) => setMessage((err as Error).message));
+    }, [gameId, mapId]);
+
+    useEffect(load, [load]);
+
+    async function restore(v: MapVersion) {
+        if (!window.confirm(`Restore ${gameId}/${mapId} to version #${v.number}? The current version is kept as a backup.`)) {
+            return;
+        }
+        try {
+            await apiPost(`/api/maps/${gameId}/${mapId}/restore`, { version: v.number });
+            setMessage(`Restored to #${v.number}.`);
+            setTimeout(() => { load(); onRestored(); }, 800);
+        } catch (err) {
+            setMessage(`Restore: ${(err as Error).message}`);
+        }
+    }
+
+    if (!versions) return <div className="text-muted text-xs">{message ?? 'Loading versions...'}</div>;
+    return (
+        <div className="space-y-2" data-testid={`versions-${mapId}`}>
+            {message && <div className="text-xs text-muted">{message}</div>}
+            {versions.length === 0 ? (
+                <div className="text-muted text-xs">No older versions yet. One is kept each time the map is saved.</div>
+            ) : (
+                <ul className="space-y-1 text-xs">
+                    {versions.map((v) => (
+                        <li key={v.number} className="flex items-center justify-between gap-2">
+                            <span>
+                                <span className="font-mono">#{v.number}</span>{' '}
+                                {new Date(v.when).toLocaleString()} <span className="text-muted">by {v.actor} ({v.reason})</span>
+                            </span>
+                            {canRestore && (
+                                <Button variant="ghost" title={`Restore #${v.number}`} onClick={() => restore(v)}>
+                                    <RotateCcw className="h-4 w-4" />
+                                </Button>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
     );
 }
 

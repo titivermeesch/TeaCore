@@ -1,0 +1,34 @@
+# Destination picker for moving a player (arguments: arena, player). Lists
+# every other arena with room, with the arena values plus {from} {player}.
+enabled: true
+permission: tea.arena.admin
+title: "<primary>Move to which arena?"
+rows: 6
+refresh-ticks: 40
+pattern:
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'A':
+    source: admin-move-targets
+    item:
+      name: "<primary>{game_name} <muted>#{arena_id}"
+      lore:
+        - "<secondary>Map: <highlight>{map_name}"
+        - "<secondary>State: {state_label}"
+        - "<secondary>Players: <highlight>{players}/{max}"
+        - "<secondary>Server: <muted>{server}"
+        - ""
+        - "<success>Click to move the player here"
+      actions: ["admin-move:{from} {player} {arena}"]
+    empty: { material: BARRIER, name: "<muted>No other arena has room" }

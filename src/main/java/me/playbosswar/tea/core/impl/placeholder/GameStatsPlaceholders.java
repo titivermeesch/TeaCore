@@ -15,12 +15,8 @@ import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Auto-exposes every registered game's stats as {@code %tea_<gameId>_<stat>%},
- * with the stat key being the slugified column label (e.g. "Games won" becomes
- * {@code games_won}). Consulted as a fallback after a game's own custom
- * resolvers, so games can override or add to their stat placeholders. Schema and
- * per-player lookups are cached to keep PlaceholderAPI's frequent calls off the
- * database hot path.
+ * Consulted after a game's own resolvers, so games can override their stat
+ * placeholders. Lookups are cached to keep PlaceholderAPI off the database.
  */
 public final class GameStatsPlaceholders implements PlaceholderResolver {
 
@@ -50,7 +46,11 @@ public final class GameStatsPlaceholders implements PlaceholderResolver {
                 continue;
             }
             String slug = params.substring(gameId.length() + 1);
-            String value = values(schema, uuid).get(slug);
+            Map<String, String> values = values(schema, uuid);
+            String value = values.get(slug);
+            if (value == null && StatAliases.target(slug) != null) {
+                value = values.get(StatAliases.target(slug));
+            }
             if (value != null) {
                 return value;
             }

@@ -6,46 +6,40 @@ import java.util.UUID;
 import me.playbosswar.tea.core.api.game.GameId;
 
 /**
- * A player waiting to be routed into a game arena.
+ * A player waiting for the matchmaker leader to route them into an arena.
  *
- * <p>
- * Queue entries are stored by the {@link CoordinationBackend} and consumed by
- * the
- * matchmaker leader. The {@code mapIds} list lets a player pre-filter which
- * maps they are
- * willing to play; an empty list accepts any map for the game.
- *
- * @param playerUuid uuid of the queued player; never {@code null}.
- * @param playerName display name captured at enqueue time, used for lobby UI;
- *                   never {@code null}.
- * @param gameId     game the player is queued for; never {@code null}.
- * @param mapIds     explicit list of map ids the player will accept; empty
- *                   means any map
- *                   for the game. Defensively copied and never {@code null}
- *                   after construction.
- * @param queuedAt   timestamp the entry was created; never {@code null}.
+ * @param playerName captured at enqueue time
+ * @param mapIds     maps the player accepts; empty means any
+ * @param rating     the player's rating in the game, for ranked entries
+ * @param partyId    {@code null} without a party; members of one party go to the same arena
+ * @param partySize  {@code 1} without a party
  */
 public record QueueEntry(
         UUID playerUuid,
         String playerName,
         GameId gameId,
         List<String> mapIds,
-        Instant queuedAt) {
+        Instant queuedAt,
+        boolean ranked,
+        int rating,
+        String partyId,
+        int partySize) {
 
-    /**
-     * Canonical constructor that defensively copies {@code mapIds} and normalizes
-     * {@code null} to {@link List#of()}.
-     */
     public QueueEntry {
         mapIds = mapIds == null ? List.of() : List.copyOf(mapIds);
     }
 
-    /**
-     * Indicates whether the player has not restricted the map choice.
-     *
-     * @return {@code true} if {@link #mapIds()} is empty; the matchmaker may pick
-     *         any map.
-     */
+    /** Unranked, no party. */
+    public QueueEntry(UUID playerUuid, String playerName, GameId gameId, List<String> mapIds, Instant queuedAt) {
+        this(playerUuid, playerName, gameId, mapIds, queuedAt, false, 0, null, 1);
+    }
+
+    /** No party. */
+    public QueueEntry(UUID playerUuid, String playerName, GameId gameId, List<String> mapIds, Instant queuedAt,
+                      boolean ranked, int rating) {
+        this(playerUuid, playerName, gameId, mapIds, queuedAt, ranked, rating, null, 1);
+    }
+
     public boolean acceptsAnyMap() {
         return mapIds.isEmpty();
     }

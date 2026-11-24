@@ -21,18 +21,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
-import org.bukkit.WorldType;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Manages per-player map-authoring sessions. Each session runs in its own
- * temporary
- * void world {@code tea_edit_<playerShortUuid>_<game>_<map>}. On create/edit we
- * spin the
- * world up; on save/discard we unload it, delete its folder, and teleport the
- * player back.
- */
+/** Each session runs in its own temporary void world {@code tea_edit_<playerShortUuid>_<game>_<map>}. */
 public final class MapEditingService {
 
     private final Plugin plugin;
@@ -41,6 +33,7 @@ public final class MapEditingService {
     private final MapExtensionRegistryImpl extensionRegistry;
     private final Logger logger;
     private final ConcurrentHashMap<UUID, MapDraft> drafts = new ConcurrentHashMap<>();
+    private MapBackups backups;
 
     public MapEditingService(Plugin plugin, MapService mapService, MapPersistence persistence,
             MapExtensionRegistryImpl extensionRegistry, Logger logger) {
@@ -49,6 +42,14 @@ public final class MapEditingService {
         this.persistence = persistence;
         this.extensionRegistry = extensionRegistry;
         this.logger = logger;
+    }
+
+    public void setBackups(MapBackups backups) {
+        this.backups = backups;
+    }
+
+    public MapBackups backups() {
+        return backups;
     }
 
     public void loadAllAndRegister() {
@@ -61,10 +62,6 @@ public final class MapEditingService {
         return Optional.ofNullable(drafts.get(player.getUniqueId()));
     }
 
-    /**
-     * Create a brand-new map. Fails if a map with this id already exists or if the
-     * player is already editing.
-     */
     public MapDraft create(Player player, GameId gameId, String mapId) {
         if (drafts.containsKey(player.getUniqueId())) {
             throw new IllegalStateException("You already have an active draft. Save or discard it first.");
@@ -80,13 +77,10 @@ public final class MapEditingService {
         drafts.put(player.getUniqueId(), draft);
         player.teleport(MapOrigin.in(world));
         player.setGameMode(org.bukkit.GameMode.CREATIVE);
+        fireStarted(player, draft);
         return draft;
     }
 
-    /**
-     * Edit an existing map: spin up a void world and paste the saved schematic into
-     * it.
-     */
     public MapDraft edit(Player player, GameId gameId, String mapId) throws IOException {
         if (drafts.containsKey(player.getUniqueId())) {
             throw new IllegalStateException("You already have an active draft. Save or discard it first.");
@@ -101,9 +95,9 @@ public final class MapEditingService {
 
         if (def.schematic().isPresent() && Files.isRegularFile(def.schematicFile())) {
             try {
-                WorldEditPaster.paste(def.schematicFile(), world, MapOrigin.X, MapOrigin.Y, MapOrigin.Z);
+                SchematicStore.current().paste(def.schematicFile(), world, MapOrigin.X, MapOrigin.Y, MapOrigin.Z);
 
-                int[] dims = WorldEditPaster.readDimensions(def.schematicFile());
+                int[] dims = SchematicStore.current().readDimensions(def.schematicFile());
                 MapDraft draft = new MapDraft(player.getUniqueId(), gameId, mapId, worldName, pre);
                 Location origin = MapOrigin.in(world);
                 draft.setPos1(origin.clone());
@@ -134,6 +128,7 @@ public final class MapEditingService {
                 drafts.put(player.getUniqueId(), draft);
                 player.teleport(origin);
                 player.setGameMode(org.bukkit.GameMode.CREATIVE);
+                fireStarted(player, draft);
                 return draft;
             } catch (Exception e) {
                 // Catch broadly (not WorldEditException) so this class carries no
@@ -146,15 +141,12 @@ public final class MapEditingService {
             drafts.put(player.getUniqueId(), draft);
             player.teleport(MapOrigin.in(world));
             player.setGameMode(org.bukkit.GameMode.CREATIVE);
+            fireStarted(player, draft);
             return draft;
         }
     }
 
-    /**
-     * Returns a list of human-readable issues that would prevent a successful save.
-     * Empty list = draft is save-able. Order is relevant for the command to show
-     * the user which steps are still missing.
-     */
+    /** Order matters: the command lists the missing steps in this order. */
     public List<String> validateDraft(Player player) {
         MapDraft draft = drafts.get(player.getUniqueId());
         if (draft == null)
@@ -168,8 +160,7 @@ public final class MapEditingService {
             issues.add("participant-spawns");
         if (draft.waitingSpawn().isEmpty())
             issues.add("waiting-spawn");
-        // Any extension marked required but not set on the draft
-        for (MapExtension<?> ext : extensionRegistry.all()) {
+        for (MapExtension<?> ext : extensionsFor(draft.gameId())) {
             if (ext.required() && !draft.extensions().containsKey(ext.key().id())) {
                 issues.add("extension:" + ext.key().id());
             }
@@ -177,25 +168,10 @@ public final class MapEditingService {
         return issues;
     }
 
-    /**
-     * One remaining authoring step for the map-setup sidebar. Carries the
-     * message-bundle keys (resolved per-viewer locale by the scoreboard) plus
-     * the placeholders they need, rather than pre-rendered text.
-     *
-     * @param labelKey     bundle key for the human-readable step label.
-     * @param hintKey      bundle key for the command hint that completes it.
-     * @param placeholders placeholders for both lines (e.g. extension id /
-     *                     subcommand); never {@code null}.
-     */
+    /** Carries bundle keys rather than text so the scoreboard renders each viewer's locale. */
     public record SetupStep(String labelKey, String hintKey, Map<String, String> placeholders) {
     }
 
-    /**
-     * Returns the ordered list of setup steps the player still has to complete
-     * before the draft is save-able, derived from {@link #validateDraft(Player)}.
-     * Empty when the draft is ready (or there is no active draft). Used by the
-     * map-setup sidebar; chat output uses {@code validateDraft} directly.
-     */
     public List<SetupStep> remainingSteps(Player player) {
         List<SetupStep> steps = new ArrayList<>();
         for (String field : validateDraft(player)) {
@@ -220,7 +196,6 @@ public final class MapEditingService {
         return steps;
     }
 
-    /** Captures the region, persists the map, and tears down the edit world. */
     public MapDefinition save(Player player) throws IOException {
         MapDraft draft = drafts.get(player.getUniqueId());
         if (draft == null)
@@ -236,14 +211,17 @@ public final class MapEditingService {
             throw new IllegalStateException("Edit world not loaded: " + draft.editWorldName());
 
         persistence.ensureDirectories();
-        Path schematicFile = persistence.schematicsDir().resolve(draft.mapId() + ".schem");
+        Path schematicFile = persistence.schematicsDir().resolve(draft.mapId() + "." + SchematicStore.current().extension());
+        if (backups != null) {
+            backups.snapshot(draft.gameId(), draft.mapId(), player.getName(), "save");
+        }
 
         Location p1 = draft.pos1().get();
         Location p2 = draft.pos2().get();
 
         int[] min;
         try {
-            min = WorldEditPaster.saveRegion(editWorld,
+            min = SchematicStore.current().saveRegion(editWorld,
                     p1.getBlockX(), p1.getBlockY(), p1.getBlockZ(),
                     p2.getBlockX(), p2.getBlockY(), p2.getBlockZ(), schematicFile);
         } catch (Exception e) {
@@ -279,13 +257,10 @@ public final class MapEditingService {
 
         teleportOutAndTeardown(player, draft);
         drafts.remove(player.getUniqueId());
+        me.playbosswar.tea.core.impl.map.MapChanges.changed();
         return def;
     }
 
-    /**
-     * Drops the draft, teleports player out, tears down the edit world. No map is
-     * saved.
-     */
     public void discard(Player player) {
         MapDraft draft = drafts.remove(player.getUniqueId());
         if (draft == null)
@@ -294,10 +269,91 @@ public final class MapEditingService {
     }
 
     public void delete(GameId gameId, String mapId) throws IOException {
+        delete(gameId, mapId, "console");
+    }
+
+    /** A backup is kept, so {@link #restore} can bring the map back. */
+    public void delete(GameId gameId, String mapId, String actor) throws IOException {
+        if (backups != null) {
+            backups.snapshot(gameId, mapId, actor, "delete");
+        }
         persistence.delete(gameId, mapId);
         mapService.unregister(gameId, mapId);
-        Path schematicFile = persistence.schematicsDir().resolve(mapId + ".schem");
+        // Either format may exist (saved on a modern or a legacy server).
+        Files.deleteIfExists(persistence.schematicsDir().resolve(mapId + ".schem"));
+        Path schematicFile = persistence.schematicsDir().resolve(mapId + ".schematic");
         Files.deleteIfExists(schematicFile);
+        me.playbosswar.tea.core.impl.map.MapChanges.changed();
+    }
+
+    /**
+     * Arenas already running keep the map they started with.
+     *
+     * @throws IllegalStateException "editing" if someone is editing that map,
+     *                               "no-version" if there is no such version.
+     */
+    public MapDefinition restore(GameId gameId, String mapId, int number, String actor) throws IOException {
+        if (backups == null) {
+            throw new IllegalStateException("no-version");
+        }
+        for (MapDraft draft : drafts.values()) {
+            if (draft.gameId().equals(gameId) && draft.mapId().equals(mapId)) {
+                throw new IllegalStateException("editing");
+            }
+        }
+        MapBackups.Version version = backups.get(gameId, mapId, number)
+                .orElseThrow(() -> new IllegalStateException("no-version"));
+        backups.restore(gameId, mapId, version, actor);
+        MapDefinition def = persistence.loadForGame(gameId).stream()
+                .filter(d -> d.mapId().equals(mapId)).findFirst()
+                .orElseThrow(() -> new IOException("Restored map could not be read back"));
+        mapService.register(def);
+        MapChanges.changed();
+        return def;
+    }
+
+    /** Sorted by id, independent of registration order. */
+    public List<MapExtension<?>> extensionsFor(GameId gameId) {
+        List<MapExtension<?>> out = new ArrayList<>();
+        for (MapExtension<?> ext : extensionRegistry.all()) {
+            if (ext.appliesTo(gameId)) {
+                out.add(ext);
+            }
+        }
+        out.sort(java.util.Comparator.comparing(e -> e.key().id()));
+        return out;
+    }
+
+    public interface DraftListener {
+        void started(Player player, MapDraft draft);
+
+        void ended(Player player, MapDraft draft);
+    }
+
+    private final List<DraftListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addListener(DraftListener listener) {
+        listeners.add(listener);
+    }
+
+    private void fireStarted(Player player, MapDraft draft) {
+        for (DraftListener l : listeners) {
+            try {
+                l.started(player, draft);
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "Draft listener failed", e);
+            }
+        }
+    }
+
+    private void fireEnded(Player player, MapDraft draft) {
+        for (DraftListener l : listeners) {
+            try {
+                l.ended(player, draft);
+            } catch (RuntimeException e) {
+                logger.log(Level.WARNING, "Draft listener failed", e);
+            }
+        }
     }
 
     public MapPersistence persistence() {
@@ -308,7 +364,7 @@ public final class MapEditingService {
         return mapService;
     }
 
-    /** Tears down any edit worlds still on disk at startup (e.g. from a crash). */
+    /** Removes edit worlds left on disk by a crash. */
     public void purgeOrphanedEditWorlds() {
         Path container = Bukkit.getWorldContainer().toPath();
         try (var stream = Files.list(container)) {
@@ -340,10 +396,8 @@ public final class MapEditingService {
     }
 
     private World createEditWorld(String name) {
-        WorldCreator creator = new WorldCreator(name)
-                .generator(new VoidChunkGenerator())
+        WorldCreator creator = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().worlds().voidWorld(name)
                 .environment(World.Environment.NORMAL)
-                .type(WorldType.FLAT)
                 .generateStructures(false);
         World world = creator.createWorld();
         if (world == null)
@@ -354,6 +408,7 @@ public final class MapEditingService {
     }
 
     private void teleportOutAndTeardown(Player player, MapDraft draft) {
+        fireEnded(player, draft);
         Location back = draft.preEditLocation();
         if (back == null || back.getWorld() == null
                 || back.getWorld().getName().equals(draft.editWorldName())) {
@@ -402,10 +457,6 @@ public final class MapEditingService {
         return ((MapExtension) ext).toRelative(value, mx, my, mz);
     }
 
-    /**
-     * Converts a delta-based SpawnPoint into an absolute location spawn, anchored
-     * at the given origin.
-     */
     private static SpawnPoint absolutize(SpawnPoint delta, Location origin) {
         return new SpawnPoint(delta.id(),
                 origin.getX() + delta.x(),
@@ -414,7 +465,6 @@ public final class MapEditingService {
                 delta.yaw(), delta.pitch());
     }
 
-    /** Converts an absolute-location SpawnPoint into a delta from min-corner. */
     private static SpawnPoint relativize(SpawnPoint absolute, int minX, int minY, int minZ) {
         return new SpawnPoint(absolute.id(),
                 absolute.x() - minX,

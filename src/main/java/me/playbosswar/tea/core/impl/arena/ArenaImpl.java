@@ -14,11 +14,23 @@ public final class ArenaImpl implements Arena {
 
     private final ArenaId id;
     private final GameId gameId;
-    private final String mapId;
+    private volatile String mapId;
+    /** Set when a player asked for this map: map voting leaves the arena alone. */
+    private volatile boolean mapLocked;
     private final int minPlayers;
     private final int maxPlayers;
 
     private volatile World world;
+    /** This arena's own copy of its waiting room, or null (players wait at the map's waiting spawn). */
+    private volatile WaitingRooms.Room waitingRoom;
+
+    public WaitingRooms.Room waitingRoom() {
+        return waitingRoom;
+    }
+
+    void setWaitingRoom(WaitingRooms.Room room) {
+        this.waitingRoom = room;
+    }
     private volatile ArenaState state = ArenaState.ALLOCATING;
     private final UUID matchId = UUID.randomUUID();
     private volatile int phaseSecondsRemaining = -1;
@@ -47,6 +59,19 @@ public final class ArenaImpl implements Arena {
     @Override
     public Optional<String> mapId() {
         return Optional.ofNullable(mapId);
+    }
+
+    /** Map voting: the world is swapped separately. */
+    public void setMapId(String mapId) {
+        this.mapId = mapId;
+    }
+
+    public boolean mapLocked() {
+        return mapLocked;
+    }
+
+    public void lockMap() {
+        this.mapLocked = true;
     }
 
     @Override

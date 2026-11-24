@@ -1,0 +1,58 @@
+# One arena in the arena manager (argument: arena). The top item (source
+# admin-arena) shows the arena with the same values as admin-arenas.
+enabled: true
+permission: tea.arena.admin
+title: "<primary>Arena"
+rows: 4
+refresh-ticks: 20
+pattern:
+  - "####I####"
+  - "#S#E#R#P#"
+  - "##O###V##"
+  - "B#######X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'S':
+    material: LIME_CONCRETE
+    name: "<success>Skip to the next phase"
+    lore: ["<muted>Starts the countdown or the match now"]
+    actions: ["admin-start:{arena}", "sound:UI_BUTTON_CLICK"]
+  'E':
+    material: GOLD_BLOCK
+    name: "<warning>End the match"
+    lore: ["<muted>Pick a winner, or end it as a draw"]
+    actions: ["open-menu:admin-end arena={arena}"]
+  'R':
+    material: TNT
+    name: "<error>Release the arena"
+    lore: ["<muted>Sends everyone out and deletes the arena"]
+    actions: ["confirm:Release this arena?|admin-release:{arena}"]
+  'P':
+    material: PLAYER_HEAD
+    name: "<primary>Players"
+    lore: ["<muted>Kick, move, spectate or teleport"]
+    actions: ["open-menu:admin-players arena={arena}"]
+  'O':
+    material: ENDER_EYE
+    name: "<secondary>Observe"
+    lore: ["<muted>Fly around the arena unseen", "<muted>(sends you to its server if needed)"]
+    actions: ["admin-visit:{arena} observe"]
+  'V':
+    material: SPYGLASS
+    name: "<secondary>Spectate"
+    lore: ["<muted>Join as a spectator"]
+    actions: ["admin-visit:{arena} spectate"]
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'I':
+    source: admin-arena
+    item:
+      name: "<primary>{game_name} <muted>#{arena_id}"
+      lore:
+        - "<secondary>Map: <highlight>{map_name}"
+        - "<secondary>State: {state_label} <muted>({time})"
+        - "<secondary>Players: <highlight>{players}/{max} <muted>(min {min})"
+        - "<secondary>Spectators: <highlight>{spectators}"
+        - "<secondary>Server: <muted>{server}"
+    empty: { material: BARRIER, name: "<muted>This arena is gone" }

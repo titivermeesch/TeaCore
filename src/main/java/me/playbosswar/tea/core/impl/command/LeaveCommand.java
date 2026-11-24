@@ -9,19 +9,8 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
 /**
- * {@code /leave} — drops the player from their current arena, or removes
- * them from the matchmaker queue if they're not in one yet.
- *
- * <p>
- * Lives in TeaCore (not TeaLobby) because players need to be able to leave
- * an arena from the arena server, where TeaLobby is typically not installed.
- * Behavior order:
- * <ol>
- * <li>If the player is in an arena, remove them with reason
- * {@link ArenaPlayerLeaveEvent.LeaveReason#COMMAND}.</li>
- * <li>Otherwise, if they're in any matchmaker queue, dequeue them.</li>
- * <li>Otherwise, tell them they're not in anything.</li>
- * </ol>
+ * Lives in TeaCore, not TeaLobby, because players leave from the arena server,
+ * where TeaLobby is usually not installed.
  */
 public final class LeaveCommand implements TabExecutor {
 

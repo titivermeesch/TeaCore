@@ -22,11 +22,8 @@ import me.playbosswar.tea.core.api.combat.MatchStats;
 import me.playbosswar.tea.core.api.team.Team;
 import me.playbosswar.tea.core.api.team.TeamManager;
 import org.bukkit.Bukkit;
-import org.bukkit.entity.AreaEffectCloud;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.Projectile;
-import org.bukkit.entity.TNTPrimed;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -36,10 +33,6 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * Default {@link CombatTracker}: keeps, per victim, the last time each enemy
- * hit them, and resolves kill credit from that history.
- */
 public final class CombatTrackerImpl implements CombatTracker, Listener {
 
     /** A real death this soon after a reported one is the same death. */
@@ -55,10 +48,9 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
     private final Map<UUID, Map<UUID, Long>> hits = new ConcurrentHashMap<>();
     /** arena -> player -> {kills, deaths, assists} for the current match. */
     private final Map<ArenaId, Map<UUID, int[]>> matchStats = new ConcurrentHashMap<>();
-    /** victim -> epoch millis of their last reported death. */
     private final Map<UUID, Long> lastReported = new ConcurrentHashMap<>();
 
-    /** Windows are read from {@code combat.*} in the plugin config on every use, so reloads apply. */
+    /** Windows are read from {@code combat.*} on every use, so reloads apply. */
     public CombatTrackerImpl(Plugin plugin, ArenaManager arenas, TeamManager teams) {
         this(arenas, teams, System::currentTimeMillis,
                 () -> Math.max(0L, plugin.getConfig().getLong("combat.kill-credit-window-ms", 6000L)),
@@ -78,8 +70,6 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
     void putHit(UUID victim, UUID attacker, long at) {
         hits.computeIfAbsent(victim, k -> new ConcurrentHashMap<>()).put(attacker, at);
     }
-
-    // --- API ---
 
     @Override
     public void recordHit(Arena arena, UUID victim, UUID attacker) {
@@ -142,7 +132,6 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         hits.remove(victim);
     }
 
-    /** Pure resolution over the current history (no side effects). */
     KillCredit resolve(UUID victim, EntityDamageEvent.@Nullable DamageCause cause, long now) {
         Map<UUID, Long> history = hits.getOrDefault(victim, Map.of());
         List<Map.Entry<UUID, Long>> recent = new ArrayList<>(new HashMap<>(history).entrySet());
@@ -159,8 +148,6 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         }
         return new KillCredit(victim, killer, assists, cause);
     }
-
-    // --- Automatic tracking ---
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
@@ -216,22 +203,8 @@ public final class CombatTrackerImpl implements CombatTracker, Listener {
         }
     }
 
-    // --- Helpers ---
-
     private static @Nullable Player attackerOf(Entity damager) {
-        if (damager instanceof Player player) {
-            return player;
-        }
-        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter) {
-            return shooter;
-        }
-        if (damager instanceof TNTPrimed tnt && tnt.getSource() instanceof Player source) {
-            return source;
-        }
-        if (damager instanceof AreaEffectCloud cloud && cloud.getSource() instanceof Player source) {
-            return source;
-        }
-        return null;
+        return me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().entities().playerBehind(damager);
     }
 
     private boolean sameTeam(Arena arena, UUID a, UUID b) {

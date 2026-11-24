@@ -19,10 +19,6 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/**
- * {@code /tea lobby sign bind|unbind|list}, {@code /tea lobby spawn set|tp},
- * {@code /tea lobby reload}.
- */
 public final class TeaLobbyCommand implements TabExecutor {
 
     private static final List<String> TOP = List.of("sign", "spawn", "config", "reload");
@@ -51,10 +47,6 @@ public final class TeaLobbyCommand implements TabExecutor {
         return true;
     }
 
-    /**
-     * Dispatch entry point for the {@code /tea lobby ...} subcommand. Pulled
-     * out of {@link #onCommand} so {@code TeaCommand} can call it directly.
-     */
     public void handle(CommandSender sender, String[] args) {
         if (!sender.hasPermission("tea.lobby.admin")) {
             core.messageService().sendToSender(sender, "core.command.no-permission");
@@ -78,9 +70,6 @@ public final class TeaLobbyCommand implements TabExecutor {
         return complete(sender, args);
     }
 
-    /**
-     * Tab-complete entry point used by {@code /tea lobby}.
-     */
     public List<String> complete(CommandSender sender, String[] args) {
         if (args.length == 1) {
             String p = args[0].toLowerCase(Locale.ROOT);
@@ -259,14 +248,13 @@ public final class TeaLobbyCommand implements TabExecutor {
             core.messageService().send(player, "lobby.admin.sign.bind.usage");
             return;
         }
-        Block target = player.getTargetBlockExact(6);
+        Block target = core.platform().players().targetBlock(player, 6);
         if (target == null || !(target.getState() instanceof Sign)) {
             core.messageService().send(player, "lobby.admin.sign.not-looking-at-sign");
             return;
         }
         GameId gameId = GameId.of(args[1].toLowerCase(Locale.ROOT));
-        // The lobby validates against the fleet-wide hosted-games view; on a
-        // multi-server deployment the game plugin lives on the arena pods.
+        // Fleet-wide view: on a multi-server deployment the game plugin lives on the arena servers.
         if (!core.coordination().allHostedGames().contains(gameId)) {
             core.messageService().send(player, "lobby.play.unknown-game",
                     Map.of("game", gameId.value()));
@@ -292,7 +280,7 @@ public final class TeaLobbyCommand implements TabExecutor {
             core.messageService().sendToSender(sender, "core.command.player-only");
             return;
         }
-        Block target = player.getTargetBlockExact(6);
+        Block target = core.platform().players().targetBlock(player, 6);
         if (target == null || !(target.getState() instanceof Sign signState)) {
             core.messageService().send(player, "lobby.admin.sign.not-looking-at-sign");
             return;
@@ -300,9 +288,8 @@ public final class TeaLobbyCommand implements TabExecutor {
         boolean removed = signs.unbind(target.getWorld().getName(),
                 target.getX(), target.getY(), target.getZ());
         if (removed) {
-            var front = signState.getSide(org.bukkit.block.sign.Side.FRONT);
             for (int i = 0; i < 4; i++)
-                front.setLine(i, "");
+                signState.setLine(i, "");
             signState.update();
             core.messageService().send(player, "lobby.admin.sign.unbind.done");
         } else {

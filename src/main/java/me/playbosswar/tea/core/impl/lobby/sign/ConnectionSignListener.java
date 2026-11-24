@@ -14,10 +14,6 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 
-/**
- * Right-click a bound sign to join the queue for its game. Breaking a bound
- * sign auto-unbinds it.
- */
 public final class ConnectionSignListener implements Listener {
 
     private final TeaCoreAPI core;

@@ -14,19 +14,6 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
-/**
- * {@code /kit [game] [kitId]}.
- * <ul>
- * <li>No args while in an arena: opens the picker for that arena's game.</li>
- * <li>{@code /kit <game>}: opens the picker for that specific game.</li>
- * <li>{@code /kit <game> <kitId>}: direct-selects the kit (no GUI).</li>
- * </ul>
- *
- * <p>
- * Primarily exists so the waiting-area menu items can dispatch
- * {@code /kit <game>} to open the selector without holding a reference to
- * {@link KitSelectorGui} themselves.
- */
 public final class KitCommand implements TabExecutor {
 
     private final TeaCorePlugin plugin;
@@ -65,7 +52,6 @@ public final class KitCommand implements TabExecutor {
             return true;
         }
 
-        // The YAML kits menu when menus are on; the built-in picker otherwise.
         if (!plugin.menus().open(player, "kits", Map.of("game", gameId.value()))) {
             gui.open(player, gameId);
         }

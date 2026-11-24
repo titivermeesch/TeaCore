@@ -3,11 +3,9 @@ package me.playbosswar.tea.core.api.version;
 import java.util.Objects;
 
 /**
- * A version constraint a game places on the TeaCore it runs against, e.g.
- * {@code ">=0.2.0"} or {@code "==1.0.0"}. Parsed from a spec string of an
- * operator followed by a version; a bare version defaults to {@link Operator#AT_LEAST}.
+ * A constraint a game places on the TeaCore version, e.g. {@code ">=0.2.0"}.
  *
- * <p>Only the numeric {@code major.minor.patch} components are compared - any
+ * <p>Only the numeric {@code major.minor.patch} components are compared. Any
  * pre-release or build qualifier (e.g. {@code -SNAPSHOT}) is ignored, so
  * {@code 0.2.0-SNAPSHOT} satisfies both {@code ">=0.2.0"} and {@code "==0.2.0"}.
  * Missing trailing components count as zero ({@code "1.2"} equals {@code "1.2.0"}).
@@ -16,7 +14,6 @@ import java.util.Objects;
  */
 public final class VersionRequirement {
 
-    /** Comparison operator applied between the installed version and the target. */
     public enum Operator {
         EQUAL("=="),
         AT_LEAST(">="),
@@ -46,15 +43,11 @@ public final class VersionRequirement {
     }
 
     /**
-     * Parses a requirement spec.
-     *
-     * @param spec an operator ({@code ==}, {@code >=}, {@code >}, {@code <=},
-     *             {@code <}, or {@code =}) followed by a version, or a bare
-     *             version (treated as {@code >=}); must not be {@code null} or
-     *             blank.
-     * @return the parsed requirement.
-     * @throws IllegalArgumentException if the spec is null, blank, or carries no
-     *                                  version after the operator.
+     * @param spec an operator ({@code ==}, {@code =}, {@code >=}, {@code >},
+     *             {@code <=}, {@code <}) followed by a version, or a bare
+     *             version, which means {@code >=}.
+     * @throws IllegalArgumentException if the spec is blank or has no version
+     *                                  after the operator.
      */
     public static VersionRequirement parse(String spec) {
         if (spec == null || spec.isBlank()) {
@@ -81,13 +74,6 @@ public final class VersionRequirement {
         return new VersionRequirement(op, v);
     }
 
-    /**
-     * Tests whether an installed version satisfies this requirement.
-     *
-     * @param installedVersion the version to test, e.g. {@code "0.2.0-SNAPSHOT"};
-     *                         must not be {@code null}.
-     * @return {@code true} if it satisfies the constraint.
-     */
     public boolean isSatisfiedBy(String installedVersion) {
         int cmp = compare(parts(installedVersion), targetParts);
         return switch (operator) {

@@ -22,12 +22,9 @@ import me.playbosswar.tea.core.api.menu.MenuEntry;
 import me.playbosswar.tea.core.api.menu.MenuService;
 import me.playbosswar.tea.core.api.menu.MenuSource;
 import me.playbosswar.tea.core.api.message.MessageService;
+import me.playbosswar.tea.core.impl.menu.bedrock.BedrockBridge;
 import me.playbosswar.tea.core.impl.sidebar.PapiBridge;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.Registry;
-import org.bukkit.Sound;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
@@ -45,7 +42,6 @@ import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
-/** Default {@link MenuService}: YAML menus rendered into chest inventories. */
 public final class MenuServiceImpl implements MenuService, Listener {
 
     private final Plugin core;
@@ -55,10 +51,12 @@ public final class MenuServiceImpl implements MenuService, Listener {
     private final Map<String, LoadedMenu> menus = new ConcurrentHashMap<>();
     private final Map<String, MenuSource> sources = new ConcurrentHashMap<>();
     private final Map<String, MenuAction> actions = new ConcurrentHashMap<>();
-    /** Per player: menus to return to with {@code back}. */
     private final Map<UUID, Deque<Opened>> history = new ConcurrentHashMap<>();
     private BukkitTask refreshTask;
     private long ticks;
+    /** Null without Floodgate. */
+    private volatile BedrockBridge bedrock;
+    private final Map<UUID, Holder> forms = new ConcurrentHashMap<>();
 
     private record LoadedMenu(String id, Plugin owner, File file, MenuDef def) { }
 
@@ -70,6 +68,10 @@ public final class MenuServiceImpl implements MenuService, Listener {
         this.features = features;
         this.logger = logger;
         registerBuiltinActions();
+    }
+
+    public void setBedrock(BedrockBridge bedrock) {
+        this.bedrock = bedrock;
     }
 
     public void start() {
@@ -85,8 +87,6 @@ public final class MenuServiceImpl implements MenuService, Listener {
         }
     }
 
-    // --- Registration ---
-
     @Override
     public String registerMenu(Plugin owner, String resourcePath) {
         File file = new File(owner.getDataFolder(), resourcePath);
@@ -99,7 +99,6 @@ public final class MenuServiceImpl implements MenuService, Listener {
         return id;
     }
 
-    /** Loads every extra *.yml admins dropped into plugins/TeaCore/menus/. */
     public void loadCustomMenus() {
         File dir = new File(core.getDataFolder(), "menus");
         File[] files = dir.listFiles((d, name) -> name.endsWith(".yml"));
@@ -141,7 +140,7 @@ public final class MenuServiceImpl implements MenuService, Listener {
         actions.put(id, action);
     }
 
-    /** The menu's {@code permission:} value, or null when anyone may open it. */
+    /** Null when anyone may open it. */
     public String permissionOf(String menuId) {
         LoadedMenu menu = menus.get(menuId);
         return menu == null ? null : menu.def().permission();
@@ -171,8 +170,6 @@ public final class MenuServiceImpl implements MenuService, Listener {
         return features.enabled("menus");
     }
 
-    // --- Opening and rendering ---
-
     @Override
     public boolean open(Player player, String menuId, Map<String, String> args) {
         String permission = permissionOf(menuId);
@@ -182,7 +179,7 @@ public final class MenuServiceImpl implements MenuService, Listener {
         return open(player, menuId, args == null ? Map.of() : args, 0, true);
     }
 
-    /** Opens a menu without its {@code permission:} check (an admin opening it for someone). */
+    /** Skips the menu's {@code permission:} check (an admin opening it for someone). */
     public boolean openBypassingPermission(Player player, String menuId, Map<String, String> args) {
         return open(player, menuId, args == null ? Map.of() : args, 0, true);
     }
@@ -194,7 +191,7 @@ public final class MenuServiceImpl implements MenuService, Listener {
         LoadedMenu menu = menus.get(menuId);
         Map<String, String> base = new HashMap<>(args);
         base.put("player", player.getName());
-        Holder current = player.getOpenInventory().getTopInventory().getHolder() instanceof Holder h ? h : null;
+        Holder current = currentHolder(player);
         if (current == null && pushHistory) {
             // Opened from outside a menu (command, item): start a fresh history.
             history.remove(player.getUniqueId());
@@ -206,17 +203,135 @@ public final class MenuServiceImpl implements MenuService, Listener {
         String title = text(player, menu.def().title(), base);
         Inventory inventory = Bukkit.createInventory(holder, menu.def().rows() * 9, title);
         holder.inventory = inventory;
+        holder.title = title;
         render(player, menu.def(), holder, base);
+        BedrockBridge bridge = bedrock;
+        if (bridge != null && menu.def().bedrock() && bridge.isBedrock(player)) {
+            holder.form = true;
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof Holder) {
+                player.closeInventory();
+            }
+            sendForm(player, holder);
+            return true;
+        }
+        forms.remove(player.getUniqueId());
         player.openInventory(inventory);
         return true;
     }
 
-    /** Fills (or refills) the holder's inventory and click map. */
+    private Holder currentHolder(Player player) {
+        if (player.getOpenInventory().getTopInventory().getHolder() instanceof Holder h) {
+            return h;
+        }
+        return forms.get(player.getUniqueId());
+    }
+
+    private static final ClickType[] FORM_CLICKS = {
+        ClickType.LEFT, ClickType.RIGHT, ClickType.SHIFT_LEFT, ClickType.SHIFT_RIGHT};
+    private static final String[] FORM_CLICK_KEYS = {"left", "right", "shift-left", "shift-right"};
+
+    private void sendForm(Player player, Holder holder) {
+        BedrockBridge bridge = bedrock;
+        if (bridge == null) {
+            return;
+        }
+        List<Integer> slots = new ArrayList<>();
+        List<String> buttons = new ArrayList<>();
+        for (int slot = 0; slot < holder.inventory.getSize(); slot++) {
+            Click click = holder.clicks.get(slot);
+            ItemStack stack = holder.inventory.getItem(slot);
+            if (click == null || stack == null || !click.item().clickable()) {
+                continue;
+            }
+            slots.add(slot);
+            buttons.add(bedrockText(label(stack)));
+        }
+        holder.sends++;
+        forms.put(player.getUniqueId(), holder);
+        bridge.send(player, new BedrockBridge.Form(bedrockText(holder.title), "", buttons,
+                pick -> {
+                    if (forms.get(player.getUniqueId()) == holder && pick >= 0 && pick < slots.size()) {
+                        pickSlot(player, holder, slots.get(pick));
+                    }
+                },
+                () -> forms.remove(player.getUniqueId(), holder)));
+    }
+
+    /** Items that do different things per click type get a second form listing those clicks. */
+    private void pickSlot(Player player, Holder holder, int slot) {
+        Click click = holder.clicks.get(slot);
+        if (click == null) {
+            return;
+        }
+        List<ClickType> variants = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        List<List<String>> seen = new ArrayList<>();
+        String locale = messages.resolveLocale(player);
+        for (int i = 0; i < FORM_CLICKS.length; i++) {
+            List<String> run = click.item().actionsFor(FORM_CLICKS[i]);
+            if (!run.isEmpty() && !seen.contains(run)) {
+                seen.add(run);
+                variants.add(FORM_CLICKS[i]);
+                labels.add(bedrockText(messages.renderLegacyNoPrefix(locale,
+                        "core.menu.bedrock." + FORM_CLICK_KEYS[i], Map.of())));
+            }
+        }
+        if (variants.size() <= 1) {
+            runFormClick(player, holder, click, variants.isEmpty() ? ClickType.LEFT : variants.get(0));
+            return;
+        }
+        ItemStack stack = holder.inventory.getItem(slot);
+        ItemMeta meta = stack == null ? null : stack.getItemMeta();
+        String content = meta != null && meta.getLore() != null ? String.join("\n", meta.getLore()) : "";
+        labels.add(bedrockText(messages.renderLegacyNoPrefix(locale, "core.menu.bedrock.back", Map.of())));
+        bedrock.send(player, new BedrockBridge.Form(bedrockText(stack == null ? holder.title : label(stack)),
+                bedrockText(content), labels,
+                pick -> {
+                    if (forms.get(player.getUniqueId()) != holder) {
+                        return;
+                    }
+                    if (pick >= 0 && pick < variants.size()) {
+                        runFormClick(player, holder, click, variants.get(pick));
+                    } else {
+                        sendForm(player, holder);
+                    }
+                },
+                () -> forms.remove(player.getUniqueId(), holder)));
+    }
+
+    /**
+     * The form closes once a button is pressed, so it only comes back if an action
+     * shows a menu again (refresh, paging, back, open-menu).
+     */
+    private void runFormClick(Player player, Holder holder, Click click, ClickType type) {
+        int sends = holder.sends;
+        MenuClick context = new MenuClick(player, holder.menuId, holder.args, click.values(), type, this);
+        for (String raw : click.item().actionsFor(type)) {
+            runAction(context, holder, fill(raw, click.values()));
+        }
+        if (holder.sends == sends) {
+            forms.remove(player.getUniqueId(), holder);
+        }
+    }
+
+    private static String label(ItemStack stack) {
+        ItemMeta meta = stack.getItemMeta();
+        if (meta != null && meta.hasDisplayName() && !meta.getDisplayName().isBlank()) {
+            return meta.getDisplayName();
+        }
+        String name = stack.getType().name().toLowerCase(Locale.ROOT).replace('_', ' ');
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+
+    /** Bedrock reads section codes too, but uses m and n as colours, not strikethrough/underline. */
+    static String bedrockText(String legacy) {
+        return legacy == null ? "" : legacy.replaceAll("(?i)\u00a7[mn]", "");
+    }
+
     private void render(Player player, MenuDef def, Holder holder, Map<String, String> base) {
         Inventory inv = holder.inventory;
         inv.clear();
         holder.clicks.clear();
-        // List cells per list char, in pattern order.
         Map<Character, List<Integer>> listCells = new LinkedHashMap<>();
         for (int slot = 0; slot < def.rows() * 9; slot++) {
             char c = def.charAt(slot);
@@ -299,8 +414,9 @@ public final class MenuServiceImpl implements MenuService, Listener {
         if (icon != null) {
             stack = icon.clone();
         } else {
-            Material material = Material.matchMaterial(fill(def.material(), values).trim());
-            stack = new ItemStack(material == null || material.isAir() ? Material.STONE : material);
+            // Modern item names (RED_WOOL) work on every version through the platform.
+            stack = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items()
+                    .stackOr(fill(def.material(), values).trim(), "STONE", 1);
         }
         String amount = def.amount() == null ? null : fill(def.amount(), values);
         if (amount != null) {
@@ -343,19 +459,19 @@ public final class MenuServiceImpl implements MenuService, Listener {
             meta.setLore(lore);
         }
         if (def.glow() != null && truthy(fill(def.glow(), values))) {
-            Enchantment glint = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("unbreaking"));
+            Enchantment glint = me.playbosswar.tea.core.impl.platform.Compat.glintEnchantment();
             if (glint != null) {
                 meta.addEnchant(glint, 1, true);
             }
             meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
         }
         if (def.customModelData() != null) {
-            meta.setCustomModelData(def.customModelData());
+            me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().setCustomModelData(meta, def.customModelData());
         }
         // Skins need Mojang's session servers, so heads only get an owner on an
         // online-mode server (offline-mode lookups fail and spam the console).
         if (def.skullOwner() != null && meta instanceof SkullMeta skull && Bukkit.getOnlineMode()) {
-            skull.setOwningPlayer(Bukkit.getOfflinePlayer(fill(def.skullOwner(), values)));
+            skull.setOwner(fill(def.skullOwner(), values));
         }
         meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
         stack.setItemMeta(meta);
@@ -363,9 +479,8 @@ public final class MenuServiceImpl implements MenuService, Listener {
     }
 
     /**
-     * Renders a text field: {@code {key}} becomes a MiniMessage placeholder whose
-     * value is inserted as-is (never parsed, so values with legacy colour codes
-     * or angle brackets are safe), then PlaceholderAPI, then theme tags.
+     * {@code {key}} values are inserted as-is (never parsed), so legacy colour codes or
+     * angle brackets in them are safe. PlaceholderAPI and theme tags run after.
      */
     private String text(Player player, String template, Map<String, String> values) {
         if (template == null) {
@@ -400,8 +515,6 @@ public final class MenuServiceImpl implements MenuService, Listener {
         return !(v.isEmpty() || v.equals("false") || v.equals("0") || v.equals("no") || v.startsWith("{"));
     }
 
-    // --- Clicks ---
-
     private static final class Holder implements InventoryHolder {
         final String menuId;
         final Map<String, String> args;
@@ -409,6 +522,10 @@ public final class MenuServiceImpl implements MenuService, Listener {
         int page;
         int pages = 1;
         Inventory inventory;
+        String title = "";
+        boolean form;
+        /** Counts sends, to tell whether an action re-sent the form. */
+        int sends;
 
         Holder(String menuId, Map<String, String> args, int page) {
             this.menuId = menuId;
@@ -456,6 +573,15 @@ public final class MenuServiceImpl implements MenuService, Listener {
         }
     }
 
+    private record PendingConfirm(String action, MenuClick click) { }
+
+    private final Map<UUID, PendingConfirm> pendingConfirms = new ConcurrentHashMap<>();
+
+    /** Paging actions are ignored since there is no menu page to move. */
+    public void runAction(MenuClick click, String raw) {
+        runAction(click, null, raw);
+    }
+
     private void runAction(MenuClick click, Holder holder, String raw) {
         String id = raw;
         String argument = "";
@@ -477,12 +603,20 @@ public final class MenuServiceImpl implements MenuService, Listener {
             }
         }
         switch (id) {
-            case "next-page" -> repage(click.player(), holder, holder.page + 1);
-            case "previous-page" -> repage(click.player(), holder, holder.page - 1);
+            case "next-page" -> {
+                if (holder != null) {
+                    repage(click.player(), holder, holder.page + 1);
+                }
+            }
+            case "previous-page" -> {
+                if (holder != null) {
+                    repage(click.player(), holder, holder.page - 1);
+                }
+            }
             default -> {
                 MenuAction action = actions.get(id);
                 if (action == null) {
-                    logger.warning("Menu " + holder.menuId + ": unknown action '" + raw + "'");
+                    logger.warning("Menu " + click.menuId() + ": unknown action '" + raw + "'");
                     return;
                 }
                 action.run(click, argument.trim());
@@ -499,10 +633,16 @@ public final class MenuServiceImpl implements MenuService, Listener {
         Map<String, String> base = new HashMap<>(holder.args);
         base.put("player", player.getName());
         render(player, menu.def(), holder, base);
+        if (holder.form) {
+            sendForm(player, holder);
+        }
     }
 
     private void registerBuiltinActions() {
-        registerAction("close", (click, arg) -> click.player().closeInventory());
+        registerAction("close", (click, arg) -> {
+            forms.remove(click.player().getUniqueId());
+            click.player().closeInventory();
+        });
         registerAction("back", (click, arg) -> {
             Deque<Opened> stack = history.get(click.player().getUniqueId());
             Opened previous = stack == null ? null : stack.poll();
@@ -528,23 +668,48 @@ public final class MenuServiceImpl implements MenuService, Listener {
         registerAction("message", (click, arg) -> messages.sendRaw(click.player(), arg));
         registerAction("sound", (click, arg) -> {
             // Either a Bukkit name (UI_BUTTON_CLICK) or a namespaced key (ui.button.click).
-            Sound sound = null;
-            if (arg.indexOf('.') >= 0 || arg.indexOf(':') >= 0) {
-                NamespacedKey key = NamespacedKey.fromString(arg.toLowerCase(Locale.ROOT));
-                sound = key == null ? null : Registry.SOUNDS.get(key);
+            // Namespaced keys (minecraft:ui.button.click) become UI_BUTTON_CLICK;
+            // the platform maps the name to this server version's sound.
+            String name = arg.substring(arg.indexOf(':') + 1).replace('.', '_').toUpperCase(Locale.ROOT);
+            me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().sounds().play(click.player(), name, 1f, 1f);
+        });
+        registerAction("none", (click, arg) -> { });
+        // confirm:<label>|<action> opens the yes/no menu; yes runs <action>.
+        registerAction("confirm", (click, arg) -> {
+            int bar = arg.indexOf('|');
+            String label = bar < 0 ? "" : arg.substring(0, bar).trim();
+            String action = bar < 0 ? arg : arg.substring(bar + 1).trim();
+            if (!isEnabled("confirm")) {
+                runAction(click, action);
+                return;
+            }
+            pendingConfirms.put(click.player().getUniqueId(), new PendingConfirm(action, click));
+            Map<String, String> args = new HashMap<>();
+            args.put("label", label);
+            open(click.player(), "confirm", args, 0, true);
+        });
+        registerAction("confirm-yes", (click, arg) -> {
+            PendingConfirm pending = pendingConfirms.remove(click.player().getUniqueId());
+            if (pending == null) {
+                click.player().closeInventory();
+                return;
+            }
+            // Go back to the menu the question came from, then run the action
+            // there (it may refresh, open another menu or close).
+            Deque<Opened> stack = history.get(click.player().getUniqueId());
+            Opened previous = stack == null ? null : stack.poll();
+            if (previous != null) {
+                open(click.player(), previous.menuId(), previous.args(), previous.page(), false);
             } else {
-                try {
-                    sound = Sound.valueOf(arg.toUpperCase(Locale.ROOT));
-                } catch (IllegalArgumentException ignored) {
-                    // unknown sound: stay silent
-                }
+                click.player().closeInventory();
             }
-            if (sound != null) {
-                click.player().playSound(click.player().getLocation(), sound, 1f, 1f);
-            }
+            MenuClick original = pending.click();
+            runAction(new MenuClick(click.player(), original.menuId(), original.args(), original.values(),
+                    original.type(), this), pending.action());
         });
         registerAction("refresh", (click, arg) -> {
-            if (click.player().getOpenInventory().getTopInventory().getHolder() instanceof Holder h) {
+            Holder h = currentHolder(click.player());
+            if (h != null) {
                 repage(click.player(), h, h.page);
             }
         });
@@ -554,7 +719,6 @@ public final class MenuServiceImpl implements MenuService, Listener {
         return command.startsWith("/") ? command.substring(1) : command;
     }
 
-    /** Re-renders open menus that asked for it ({@code refresh-ticks}). */
     private void tickRefresh() {
         ticks += 10;
         long now = ticks;
@@ -573,5 +737,7 @@ public final class MenuServiceImpl implements MenuService, Listener {
     @EventHandler
     public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
         history.remove(event.getPlayer().getUniqueId());
+        forms.remove(event.getPlayer().getUniqueId());
+        pendingConfirms.remove(event.getPlayer().getUniqueId());
     }
 }

@@ -11,9 +11,8 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.Plugin;
 
 /**
- * A game's display name and icon, used by every menu, sidebar and placeholder:
- * {@code game-display.<id>.name|icon} in TeaCore's config wins, then the game's
- * own translation and icon, then the capitalised id and paper.
+ * Lookup order: {@code game-display.<id>.name|icon} in TeaCore's config, then the
+ * game's own translation and icon, then the capitalised id and paper.
  */
 public final class GameDisplay {
 
@@ -25,7 +24,6 @@ public final class GameDisplay {
         this.core = core;
     }
 
-    /** Legacy-coloured display name in {@code locale}. */
     public String name(String locale, GameId game) {
         MessageService ms = core.messageService();
         ConfigurationSection display = plugin.getConfig().getConfigurationSection("game-display." + game.value());
@@ -40,7 +38,6 @@ public final class GameDisplay {
         return id.isEmpty() ? id : id.substring(0, 1).toUpperCase(Locale.ROOT) + id.substring(1);
     }
 
-    /** Same as {@link #name} without colour codes. */
     public String plainName(String locale, GameId game) {
         return name(locale, game).replaceAll("§[0-9a-fk-orA-FK-OR]", "");
     }

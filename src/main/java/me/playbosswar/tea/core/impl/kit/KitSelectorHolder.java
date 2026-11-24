@@ -5,10 +5,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Marker holder so the click listener can identify kit-selector inventories and
- * which game they are for.
- */
 public final class KitSelectorHolder implements InventoryHolder {
 
     private final GameId gameId;

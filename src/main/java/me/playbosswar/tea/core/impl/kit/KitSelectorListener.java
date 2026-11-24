@@ -5,26 +5,13 @@ import me.playbosswar.tea.core.api.economy.EconomyService;
 import me.playbosswar.tea.core.api.kit.Kit;
 import me.playbosswar.tea.core.api.kit.KitRegistry;
 import me.playbosswar.tea.core.api.message.MessageService;
-import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Handles clicks inside the kit-selector GUI. Games open this GUI themselves
- * (typically via a waiting-area menu item); it is not auto-opened.
- *
- * <p>
- * On click, this listener walks the kit-purchase pipeline: if the kit is
- * priced and not yet unlocked, check the player's balance via Vault, withdraw
- * the cost, record the unlock, and then store the selection. Free and
- * already-unlocked kits skip straight to the selection step.
- */
 public final class KitSelectorListener implements Listener {
 
     private final Plugin plugin;
@@ -32,7 +19,6 @@ public final class KitSelectorListener implements Listener {
     private final KitRegistry kitRegistry;
     private final MessageService messageService;
     private final EconomyService economyService;
-    private final NamespacedKey kitKey;
 
     public KitSelectorListener(Plugin plugin, KitSelectorGui gui, KitRegistry kitRegistry,
             MessageService messageService, EconomyService economyService) {
@@ -41,7 +27,6 @@ public final class KitSelectorListener implements Listener {
         this.kitRegistry = kitRegistry;
         this.messageService = messageService;
         this.economyService = economyService;
-        this.kitKey = gui.kitKey();
     }
 
     @EventHandler
@@ -55,8 +40,7 @@ public final class KitSelectorListener implements Listener {
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || !clicked.hasItemMeta())
             return;
-        ItemMeta meta = clicked.getItemMeta();
-        String kitId = meta.getPersistentDataContainer().get(kitKey, PersistentDataType.STRING);
+        String kitId = KitSelectorGui.kitIdOf(clicked);
         if (kitId == null)
             return;
 

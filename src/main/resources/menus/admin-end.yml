@@ -1,0 +1,32 @@
+# End-match winner picker (argument: arena). Lists the arena's teams, or its
+# players when the game has no teams: {kind} (team|player) {winner} {name}
+# {detail}, plus the arena values.
+enabled: true
+permission: tea.arena.admin
+title: "<primary>Who wins?"
+rows: 4
+pattern:
+  - "#########"
+  - "#WWWWWWW#"
+  - "#WWWWWWW#"
+  - "B###D###X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'D':
+    material: GRAY_DYE
+    name: "<secondary>End as a draw"
+    lore: ["<muted>Nobody wins; everyone gets a game played"]
+    actions: ["confirm:End the match as a draw?|admin-end:{arena} draw"]
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'W':
+    source: admin-winners
+    item:
+      name: "<primary>{name}"
+      lore:
+        - "<muted>{detail}"
+        - ""
+        - "<success>Click to end the match with this winner"
+      actions: ["confirm:{name} wins?|admin-end:{arena} {kind} {winner}"]
+    empty: { material: BARRIER, name: "<muted>Nobody to pick" }

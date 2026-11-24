@@ -89,12 +89,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             "V005__core_stats.sql",
             "V006__achievements.sql",
             "V007__core_assists.sql",
-            "V008__match_history.sql");
+            "V008__match_history.sql",
+            "V009__dashboard.sql",
+            "V010__achievement_definitions.sql",
+            "V011__ratings.sql",
+            "V012__quests.sql",
+            "V013__shared_files.sql");
 
-    /**
-     * FastStats error tracker. Context-aware so it only captures throwables from
-     * TeaCore's classloader, never from other plugins running in the same JVM.
-     */
     public static final ErrorTracker ERROR_TRACKER = ErrorTracker.contextAware();
 
     private CoreConfig config;
@@ -106,6 +107,27 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private GameRegistryImpl gameRegistry;
     private MapServiceImpl mapService;
     private ArenaManagerImpl arenaManager;
+    private me.playbosswar.tea.core.impl.metrics.ServerStatsPublisher serverStats;
+    private me.playbosswar.tea.core.impl.spectator.SpectatorTools spectatorTools;
+    private me.playbosswar.tea.core.impl.arena.MapVoting mapVoting;
+    private me.playbosswar.tea.core.impl.rating.RatingService ratings;
+    private me.playbosswar.tea.core.impl.party.PartyService parties;
+
+    public MapPersistence mapPersistence() {
+        return mapPersistence;
+    }
+
+    public me.playbosswar.tea.core.impl.party.PartyService parties() {
+        return parties;
+    }
+
+    public me.playbosswar.tea.core.impl.rating.RatingService ratings() {
+        return ratings;
+    }
+
+    public me.playbosswar.tea.core.impl.arena.MapVoting mapVoting() {
+        return mapVoting;
+    }
     private LifecycleTicker lifecycleTicker;
     private ArenaPoolManager poolManager;
     private TeamManagerImpl teamManager;
@@ -113,8 +135,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private CooldownServiceImpl cooldownService;
     private VaultEconomyService economyService;
     private me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand;
-    // True once the optional lobby features (signs/spawn/play) have been wired up.
-    // Guards against double-registration when /tea reload re-enables them at runtime.
+    // Guards against double-registration when /tea reload enables lobby features at runtime.
     private boolean lobbyFeaturesActive;
     private EffectServiceImpl effectService;
     private ChatRouterImpl chatRouterImpl;
@@ -127,7 +148,8 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private ArenaHeartbeater heartbeater;
     private Matchmaker matchmaker;
     private DashboardServer dashboardServer;
-    private BungeeChannelTransport proxyTransport;
+    private ProxyTransport proxyTransport;
+    private me.playbosswar.tea.core.impl.cloud.CloudIntegration cloudIntegration;
     private StatsRegistryImpl statsRegistry;
     private CoreStatsService coreStatsService;
     private AchievementServiceImpl achievementService;
@@ -140,14 +162,17 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private me.playbosswar.tea.core.impl.placeholder.LeaderboardCache leaderboardCache;
     private me.playbosswar.tea.core.impl.menu.MenuServiceImpl menuService;
     private me.playbosswar.tea.core.impl.menu.CoreMenus coreMenus;
+    private me.playbosswar.tea.core.impl.map.editor.MapEditorTools mapEditorTools;
+    private me.playbosswar.tea.core.impl.admin.ArenaAdmin arenaAdmin;
+    private me.playbosswar.tea.core.impl.discord.DiscordWebhooks discordWebhooks;
+    private me.playbosswar.tea.core.impl.discord.DiscordEvents discordEvents;
+    private me.playbosswar.tea.core.impl.dashboard.auth.LoginCodes dashboardLoginCodes;
     private me.playbosswar.tea.core.impl.history.MatchHistoryServiceImpl matchHistory;
     private PlaceholderServiceImpl placeholderService;
     private QueueBossbarService queueBossbarService;
 
-    // Declared after the fields it reads so suppliers don't trip Java's
-    // forward-reference rule. Suppliers themselves run lazily on each FastStats
-    // flush (~30 min), well after onEnable, so reading getConfig() and instance
-    // fields is safe even though this is a field initializer.
+    // Declared after the fields it reads to satisfy Java's forward-reference rule.
+    // Suppliers run lazily on each FastStats flush, long after onEnable, so reading config here is safe.
     private final BukkitMetrics metrics = BukkitMetrics.factory()
             .token("3094ede1b35f5b42406db8387caaa65c")
             .errorTracker(ERROR_TRACKER)
@@ -175,6 +200,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         try {
             saveDefaultResources();
             loadConfigAndTheme();
+            platform(); // pick the version platform now, so a mismatch fails at startup
 
             this.audiences = BukkitAudiences.create(this);
             this.messageService = new MessageServiceImpl(
@@ -186,10 +212,23 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
             this.databaseService = new DatabaseServiceImpl(config.database(), getLogger());
             this.databaseService.registerMigrations(this, "core", CORE_MIGRATIONS);
+            if (!"files".equalsIgnoreCase(getConfig().getString("maps.storage", "database"))) {
+                this.sharedFiles = new me.playbosswar.tea.core.impl.map.SharedFiles(
+                        databaseService.dataSource(), getDataFolder().toPath(), serverId(), getLogger());
+                sharedFiles.pullAtStartup();
+                me.playbosswar.tea.core.impl.map.MapChanges.setListener(this::pushSharedFiles);
+            }
+            this.settingsStore = new me.playbosswar.tea.core.impl.settings.SettingsStore(
+                    databaseService.dataSource(), getLogger());
+            // Before any game plugin is enabled, so they read the shared values.
+            settingsStore.applyToFiles();
+            reloadConfig();
 
             this.playerProfileService = new PlayerProfileServiceImpl(databaseService.dataSource(), getLogger());
+            this.dashboardLoginCodes = new me.playbosswar.tea.core.impl.dashboard.auth.LoginCodes(
+                    databaseService.dataSource(), getLogger());
             getServer().getPluginManager()
-                    .registerEvents(new ProfileLifecycleListener(playerProfileService), this);
+                    .registerEvents(new ProfileLifecycleListener(playerProfileService, this), this);
 
             MapServiceImpl mapServiceImpl = new MapServiceImpl(getLogger());
             this.mapService = mapServiceImpl;
@@ -199,8 +238,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.mapEditingService = new MapEditingService(this, mapService, mapPersistence,
                     mapServiceImpl.extensionRegistry(), getLogger());
             this.mapEditingService.purgeOrphanedEditWorlds();
-            // Deferred to next tick so game plugins have a chance to register their
-            // MapExtensions in their own onEnable before we deserialize maps from YAML.
+            this.mapEditingService.setBackups(new me.playbosswar.tea.core.impl.map.MapBackups(
+                    mapPersistence, () -> getConfig().getInt("maps.keep-versions", 10), getLogger()));
+            // Next tick, so game plugins can register their MapExtensions before maps are deserialized.
             org.bukkit.Bukkit.getScheduler().runTask(this,
                     () -> this.mapEditingService.loadAllAndRegister());
             this.scoreboardManager = new ScoreboardManager(this);
@@ -222,16 +262,22 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                             publishHostedGames();
                     });
             this.arenaManager = new ArenaManagerImpl(this, gameRegistry, mapService, getLogger());
+            this.hosting = new me.playbosswar.tea.core.impl.arena.Hosting(this, gameRegistry);
+            arenaManager.setHosting(hosting);
 
             this.teamManager = new TeamManagerImpl(arenaManager, gameRegistry);
+            this.parties = new me.playbosswar.tea.core.impl.party.PartyService(this, getLogger());
+            // Party plugins may enable after TeaCore.
+            getServer().getScheduler().runTask(this, parties::detect);
+            teamManager.setPartyMates(uuid -> parties.partyOf(uuid)
+                    .map(p -> (java.util.Set<java.util.UUID>) p.members()).orElse(java.util.Set.of()));
             arenaManager.setTeamManager(teamManager);
             this.kitRegistry = new KitRegistryImpl(databaseService.dataSource(), getLogger());
             this.cooldownService = new CooldownServiceImpl(this);
             this.cooldownService.start();
 
-            // Vault is a hard dep, but the Economy service provider is usually
-            // registered by a separate plugin that may load after TeaCore. Resolve
-            // on the next tick so all plugins have had a chance to enable.
+            // The Vault Economy provider is registered by another plugin that may load
+            // after TeaCore, so it is resolved on the next tick.
             this.economyService = new VaultEconomyService(getLogger());
             org.bukkit.Bukkit.getScheduler().runTask(this, () -> {
                 if (!this.economyService.isAvailable()) {
@@ -256,6 +302,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.menuService = new me.playbosswar.tea.core.impl.menu.MenuServiceImpl(
                     this, messageService, featureService, getLogger());
             getServer().getPluginManager().registerEvents(menuService, this);
+            setUpBedrockForms();
             me.playbosswar.tea.core.impl.menu.GameDisplay gameDisplay =
                     new me.playbosswar.tea.core.impl.menu.GameDisplay(this, this);
             arenaValues.setGameDisplay(gameDisplay);
@@ -264,11 +311,23 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.matchHistory = new me.playbosswar.tea.core.impl.history.MatchHistoryServiceImpl(
                     this, this, databaseService.dataSource(), getLogger());
             getServer().getPluginManager().registerEvents(matchHistory, this);
+            matchHistory.startRetention(getConfig().getInt("match-history.keep-days", 90));
             new me.playbosswar.tea.core.impl.menu.PlayMenus(this, this, matchHistory, gameDisplay).register(menuService);
+            this.mapEditorTools = new me.playbosswar.tea.core.impl.map.editor.MapEditorTools(
+                    this, mapEditingService, messageService, featureService);
+            mapEditorTools.start(menuService);
             for (String file : List.of("kits", "stats", "play", "play-maps", "arenas", "profile",
-                    "profile-kits", "achievements", "history")) {
+                    "profile-kits", "achievements", "history", "confirm", "map-editor")) {
                 menuService.registerMenu(this, "menus/" + file + ".yml");
             }
+            this.spectatorTools = new me.playbosswar.tea.core.impl.spectator.SpectatorTools(this, this, featureService);
+            getServer().getPluginManager().registerEvents(spectatorTools, this);
+            menuService.registerMenu(this, "menus/spectate.yml");
+            menuService.registerMenu(this, "menus/map-vote.yml");
+            spectatorTools.start(menuService);
+            arenaValues.setWatching(spectatorTools::watching);
+            sidebarService.setSpectatorSidebar(() -> sidebarYaml.getConfigurationSection("spectator"),
+                    p -> spectatorTools.isGhost(p.getUniqueId()));
             getServer().getPluginManager().registerEvents(
                     new me.playbosswar.tea.core.impl.lobby.hotbar.LobbyHotbarService(this, this), this);
             PluginCommand profileCommand = getCommand("profile");
@@ -292,6 +351,27 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 menuCommand.setExecutor(exec);
                 menuCommand.setTabCompleter(exec);
             }
+            PluginCommand voteCommand = getCommand("vote");
+            if (voteCommand != null) {
+                voteCommand.setExecutor((sender, cmd, label, args) -> {
+                    if (!(sender instanceof org.bukkit.entity.Player player)) {
+                        messageService.sendToSender(sender, "core.command.player-only");
+                        return true;
+                    }
+                    if (mapVoting == null || mapVoting.votingArena(player).isEmpty()) {
+                        messageService.send(player, "core.vote.none");
+                    } else if (args.length > 0) {
+                        mapVoting.vote(player, args[0]);
+                    } else if (!menuService.open(player, "map-vote", java.util.Map.of())) {
+                        messageService.send(player, "core.vote.prompt",
+                                java.util.Map.of("maps", mapVoting.summary(player)));
+                    }
+                    return true;
+                });
+                voteCommand.setTabCompleter((sender, cmd, label, args) -> sender instanceof org.bukkit.entity.Player p
+                        && mapVoting != null && args.length == 1
+                        ? mapVoting.options(p).stream().filter(o -> o.startsWith(args[0])).toList() : List.of());
+            }
             PluginCommand boardCommand = getCommand("board");
             if (boardCommand != null) {
                 boardCommand.setExecutor((sender, cmd, label, args) -> {
@@ -310,12 +390,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             getServer().getPluginManager().registerEvents(coreStatsService, this);
             this.achievementService = new AchievementServiceImpl(
                     databaseService.dataSource(), getLogger(), messageService);
+            this.discordWebhooks = new me.playbosswar.tea.core.impl.discord.DiscordWebhooks(this, getLogger());
+            this.discordEvents = new me.playbosswar.tea.core.impl.discord.DiscordEvents(this, discordWebhooks);
+            getServer().getPluginManager().registerEvents(discordEvents, this);
+            achievementService.setUnlockListener(discordEvents::achievement);
 
-            // PlaceholderAPI integration. Built-in resolvers cover core/player
-            // stats and every game's stats; games add their own via
-            // placeholders().register(...). The PAPI expansion is only wired up
-            // when PlaceholderAPI is installed - resolution still works for
-            // internal callers either way.
+            // The PAPI expansion is only wired up when PlaceholderAPI is installed;
+            // internal resolution works either way.
             this.placeholderService = new PlaceholderServiceImpl();
             this.leaderboardCache = new me.playbosswar.tea.core.impl.placeholder.LeaderboardCache(
                     this, databaseService.dataSource(), statsRegistry, getLogger());
@@ -347,46 +428,90 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
             this.lifecycleTicker = new LifecycleTicker(this, arenaManager, gameRegistry, messageService);
             this.lifecycleTicker.start();
+            this.mapVoting = new me.playbosswar.tea.core.impl.arena.MapVoting(this, this, arenaManager, featureService);
+            getServer().getPluginManager().registerEvents(mapVoting, this);
+            lifecycleTicker.setHoldBeforeStart(mapVoting::holdBeforeStart);
+            mapVoting.register(menuService);
+            getServer().getPluginManager().registerEvents(
+                    new me.playbosswar.tea.core.impl.arena.WaitingLobby(this, this, featureService), this);
+            getServer().getPluginManager().registerEvents(
+                    new me.playbosswar.tea.core.impl.lobby.pvp.LobbyPvpListener(this, this), this);
+            this.npcService = new me.playbosswar.tea.core.impl.npc.NpcServiceImpl(this, this);
+            npcService.loadConfigNpcs();
+            getServer().getPluginManager().registerEvents(npcService, this);
 
-            // Coordination backend: in-memory for standalone, Redis otherwise.
-            // Must come before the pool manager - pool manager reads from it in
-            // central mode.
+            // Must be created before the pool manager, which reads from it in central mode.
             this.coordinationBackend = createCoordinationBackend();
-            this.proxyTransport = new BungeeChannelTransport(this);
-            // Build the matchmaker before the disconnect listener so the
-            // listener can ask "is this player mid-routing?" and skip the
-            // queue dequeue during a proxy hop.
+            this.serverStats = new me.playbosswar.tea.core.impl.metrics.ServerStatsPublisher(
+                    this, coordinationBackend, arenaManager::spareCount);
+            serverStats.start();
+            me.playbosswar.tea.core.impl.cloud.CloudPlatform cloud = getConfig().getBoolean("cloudnet.enabled", true)
+                    ? me.playbosswar.tea.core.impl.cloud.CloudPlatform.detect(getLogger()) : null;
+            if (cloud != null) {
+                cloudIntegration = new me.playbosswar.tea.core.impl.cloud.CloudIntegration(this, cloud, arenaManager,
+                        coordinationBackend);
+                this.proxyTransport = cloudIntegration.transport(config.network().lobbyServer());
+                cloudIntegration.start();
+            } else {
+                this.proxyTransport = new BungeeChannelTransport(this);
+            }
+            // Built before the disconnect listener so it can skip the queue dequeue during a proxy hop.
             this.matchmaker = new Matchmaker(this, coordinationBackend, gameRegistry, arenaManager, proxyTransport);
-            // Disconnect handling: clean up the player's arena membership AND
-            // drop their queue entry so a reconnect doesn't auto-route into a
-            // stale match. The matchmaker reference lets us recognize a
-            // legitimate cross-server hop and skip the dequeue in that case.
+            // Drops the queue entry on disconnect so a reconnect doesn't route into a stale match.
             getServer().getPluginManager().registerEvents(
                     new ArenaDisconnectListener(arenaManager, coordinationBackend, matchmaker), this);
             this.poolManager = new ArenaPoolManager(this, arenaManager, gameRegistry, mapService,
                     coordinationBackend, config.arenaPool(),
                     config.network().eligibleMatchmaker(), getLogger());
+            this.poolManager.setHosting(hosting);
             this.poolManager.start();
 
             this.heartbeater = new ArenaHeartbeater(this, arenaManager, coordinationBackend);
             this.heartbeater.start();
-            // Refresh hosted-games set every 20s so Redis entries don't TTL out (30s TTL).
+            this.ratings = new me.playbosswar.tea.core.impl.rating.RatingService(
+                    this, this, databaseService.dataSource(), getLogger());
+            getServer().getPluginManager().registerEvents(ratings, this);
+            heartbeater.setRatings(ratings);
+            matchmaker.setRatings(ratings);
+            registerLeaderboard();
+            registerQuests();
+            // Every 20s so the Redis entries (30s TTL) don't expire.
             org.bukkit.Bukkit.getScheduler().runTaskTimer(this,
                     this::publishHostedGames, 20L * 20L, 20L * 20L);
-            // Mirror local Bukkit events into the coordination channel so the
-            // dashboard sees a network-wide feed; executor listens for control
-            // commands addressed at this server. Both run on every backend.
             getServer().getPluginManager().registerEvents(
                     new me.playbosswar.tea.core.impl.coordination.LocalEventMirror(coordinationBackend), this);
+            this.arenaAdmin = new me.playbosswar.tea.core.impl.admin.ArenaAdmin(this);
+            getServer().getPluginManager().registerEvents(arenaAdmin, this);
+            new me.playbosswar.tea.core.impl.admin.AdminMenus(this, arenaAdmin, gameDisplay).register(menuService);
+            for (String file : List.of("admin", "admin-arenas", "admin-arena", "admin-players", "admin-end",
+                    "admin-move", "admin-maps", "admin-map-versions")) {
+                menuService.registerMenu(this, "menus/" + file + ".yml");
+            }
+            this.settingsService = new me.playbosswar.tea.core.impl.settings.SettingsServiceImpl(
+                    this, coordinationBackend, getLogger());
+            settingsService.start();
+            settingsService.setStore(settingsStore);
+            if (sharedFiles != null) {
+                coordinationBackend.subscribeEvents(this::onSharedFilesEvent);
+            }
+            settingsService.register(this, "settings/teacore.yml", paths -> reload());
+            settingsService.register(this, "settings/quests.yml", paths -> {
+                if (quests != null) {
+                    quests.load();
+                }
+            });
+            new me.playbosswar.tea.core.impl.settings.SettingsMenus(this, settingsService).register(menuService);
+            for (String file : List.of("admin-settings", "admin-settings-file", "admin-settings-fields",
+                    "admin-settings-entries", "admin-settings-entry")) {
+                menuService.registerMenu(this, "menus/" + file + ".yml");
+            }
             new me.playbosswar.tea.core.impl.coordination.ControlExecutor(
                     this, coordinationBackend, getLogger()).start();
-            // Matchmaker also listens for PlayerJoinEvent so it can route a
-            // queued player into an arena immediately on arrival from a proxy
-            // hop, instead of waiting up to 1s for the next scheduled tick.
+            // Routes a queued player on join after a proxy hop instead of waiting for the next tick.
             getServer().getPluginManager().registerEvents(this.matchmaker, this);
             this.matchmaker.start();
 
-            this.queueBossbarService = new QueueBossbarService(this, coordinationBackend, messageService);
+            this.queueBossbarService = new QueueBossbarService(this, coordinationBackend, messageService, audiences);
             getServer().getPluginManager().registerEvents(queueBossbarService, this);
             this.queueBossbarService.start();
 
@@ -395,11 +520,15 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 TeaCommand exec = new TeaCommand(this);
                 teaCommand.setExecutor(exec);
                 teaCommand.setTabCompleter(exec);
+                PluginCommand dashboardCommand = getCommand("dashboard");
+                if (dashboardCommand != null) {
+                    dashboardCommand.setExecutor((sender, cmd, label, args) -> {
+                        exec.dashboardLogin(sender);
+                        return true;
+                    });
+                }
             }
-            // /chat exists to switch between match/team/staff/global channels and
-            // is meaningless on a lobby (no in-progress match, no team). When
-            // lobby.enabled is true enableLobbyFeatures() hides it from the command
-            // map; otherwise wire up its executor here.
+            // /chat is meaningless on a lobby; enableLobbyFeatures() unregisters it there.
             boolean lobbyEnabled = getConfig().getBoolean("lobby.enabled", false);
             if (!lobbyEnabled) {
                 PluginCommand chatCommand = getCommand("chat");
@@ -436,17 +565,14 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.dashboardServer = new DashboardServer(this, this, config.dashboard(), getLogger());
             this.dashboardServer.start();
 
-            // Optional lobby features (formerly TeaLobby plugin). Gated by
-            // lobby.enabled in config.yml — disabled by default so a fresh
-            // TeaCore install on an arena server isn't surprised. Enable on
-            // each lobby/hub server that needs /play, connection signs,
-            // spawn auto-management.
             if (lobbyEnabled) {
                 enableLobbyFeatures();
             }
 
             TeaCoreAPI.set(this);
             getLogger().info("TeaCore enabled (v" + getDescription().getVersion() + ")");
+            // First tick, after the server finished starting.
+            getServer().getScheduler().runTask(this, () -> discordEvents.serverOnline(coordinationBackend.serverId()));
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "TeaCore failed to start", e);
             ERROR_TRACKER.trackError(e);
@@ -456,7 +582,31 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
     @Override
     public void onDisable() {
+        if (cloudIntegration != null) {
+            cloudIntegration.stop();
+        }
+        if (npcService != null) {
+            npcService.shutdown();
+        }
+        if (discordEvents != null && coordinationBackend != null) {
+            discordEvents.serverOffline(coordinationBackend.serverId());
+        }
+        if (discordWebhooks != null) {
+            discordWebhooks.close(); // waits up to 5 s for queued posts
+        }
         TeaCoreAPI.set(null);
+        if (serverStats != null) {
+            serverStats.stop();
+        }
+        if (spectatorTools != null) {
+            spectatorTools.stop();
+        }
+        if (ratings != null) {
+            ratings.close();
+        }
+        if (quests != null) {
+            quests.close();
+        }
         try {
             if (dashboardServer != null)
                 dashboardServer.stop();
@@ -474,6 +624,8 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 leaderboardCache.stop();
             if (menuService != null)
                 menuService.stop();
+            if (mapEditorTools != null)
+                mapEditorTools.stop();
         } catch (Exception ignored) {
         }
         try {
@@ -506,6 +658,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 for (var arena : List.copyOf(arenaManager.all())) {
                     arenaManager.release(arena.id());
                 }
+                arenaManager.destroySpares();
             }
         } catch (Exception e) {
             getLogger().log(Level.WARNING, "Failed to release arenas cleanly", e);
@@ -550,17 +703,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         }
     }
 
-    /**
-     * Wires up the optional lobby features (formerly the TeaLobby plugin):
-     * connection signs, spawn auto-management, and the {@code /play} command.
-     * Idempotent via {@link #lobbyFeaturesActive} so it can be called from
-     * {@code onEnable} at startup and from {@link #reload()} when an admin flips
-     * {@code lobby.enabled} on at runtime, without double-registering listeners.
-     */
     private void enableLobbyFeatures() {
         if (lobbyFeaturesActive) return;
-        // /chat switches match/team/staff/global channels and is meaningless on a
-        // lobby, so hide it from tab-complete and /help when lobby mode is on.
+        // /chat is meaningless on a lobby; hide it from tab-complete and /help.
         me.playbosswar.tea.core.impl.command.CommandRegistrar.unregister("chat", getLogger());
 
         me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService signService = new me.playbosswar.tea.core.impl.lobby.sign.ConnectionSignService(
@@ -582,8 +727,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             playCommand.setExecutor(exec);
             playCommand.setTabCompleter(exec);
         }
-        // Lobby admin handler is dispatched via /tea lobby ... (see TeaCommand);
-        // there is no longer a top-level /tealobby command.
+        // Dispatched via /tea lobby (see TeaCommand).
         this.lobbyAdminCommand = new me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand(
                 this, this, signService, spawnService);
         this.lobbyFeaturesActive = true;
@@ -597,13 +741,14 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         if (menuService != null) {
             menuService.reload();
         }
+        if (quests != null) {
+            quests.load();
+        }
         messageService.replaceTheme(theme);
         messageService.replaceBundles(loadAllBundles());
 
-        // Pick up a runtime flip of lobby.enabled. Enabling at reload is safe
-        // (the wiring is idempotent); disabling is not — listeners and command
-        // executors can't be cleanly torn down without a restart, so warn instead
-        // of pretending it worked.
+        // Enabling at reload is safe (idempotent). Disabling needs a restart because
+        // listeners and command executors can't be cleanly torn down, so only warn.
         boolean lobbyEnabled = getConfig().getBoolean("lobby.enabled", false);
         if (lobbyEnabled && !lobbyFeaturesActive) {
             enableLobbyFeatures();
@@ -614,17 +759,36 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         }
     }
 
-    /**
-     * Re-reads all map YAMLs from disk and re-registers them, replacing in-memory
-     * state.
-     */
     public void reloadMaps() {
         if (mapService == null || mapEditingService == null)
             return;
+        if (sharedFiles != null) {
+            sharedFiles.pull();
+        }
+        reloadMapsFromDisk();
+    }
+
+    private void reloadMapsFromDisk() {
         for (var def : List.copyOf(mapService.all())) {
             mapService.unregister(def.gameId(), def.mapId());
         }
         mapEditingService.loadAllAndRegister();
+    }
+
+    public me.playbosswar.tea.core.impl.dashboard.auth.LoginCodes dashboardLoginCodes() {
+        return dashboardLoginCodes;
+    }
+
+    public CoreConfig.DashboardConfig dashboardConfig() {
+        return config.dashboard();
+    }
+
+    public me.playbosswar.tea.core.impl.discord.DiscordEvents discordEvents() {
+        return discordEvents;
+    }
+
+    public me.playbosswar.tea.core.impl.admin.ArenaAdmin arenaAdmin() {
+        return arenaAdmin;
     }
 
     public MapEditingService mapEditingService() {
@@ -635,33 +799,25 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         return scoreboardManager;
     }
 
-    /**
-     * Map-setup sidebar provider, or {@code null} when disabled via
-     * {@code map-setup-scoreboard.enabled}.
-     */
+    /** Null when map-setup-scoreboard.enabled is false. */
     public MapSetupSidebar mapSetupSidebar() {
         return mapSetupSidebar;
     }
 
-    /**
-     * Lobby admin handler (`/tea lobby ...`); null when {@code lobby.enabled}
-     * is false.
-     */
+    /** Null when lobby.enabled is false. */
     public me.playbosswar.tea.core.impl.lobby.command.TeaLobbyCommand lobbyAdminCommand() {
         return lobbyAdminCommand;
     }
 
-    /**
-     * Pushes the set of registered games for this backend into the coordination
-     * backend. Called on every game register/unregister and from a 20s heartbeat
-     * so Redis TTL entries don't expire.
-     */
     private void publishHostedGames() {
         if (coordinationBackend == null || gameRegistry == null)
             return;
         java.util.Set<me.playbosswar.tea.core.api.game.GameId> ids = new java.util.HashSet<>();
-        for (var def : gameRegistry.all())
-            ids.add(def.id());
+        for (var def : gameRegistry.all()) {
+            if (hosting == null || hosting.hosts(def.id())) {
+                ids.add(def.id());
+            }
+        }
         coordinationBackend.publishHostedGames(ids);
     }
 
@@ -785,12 +941,10 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         return sidebarService;
     }
 
-    /** Kit purchase/selection and other core menu logic (internal). */
     public me.playbosswar.tea.core.impl.menu.CoreMenus coreMenus() {
         return coreMenus;
     }
 
-    /** TeaCore's game-agnostic stats (internal; used by the stats menu). */
     public CoreStatsService coreStats() {
         return coreStatsService;
     }
@@ -800,9 +954,78 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         return matchHistory;
     }
 
+    private me.playbosswar.tea.core.impl.settings.SettingsServiceImpl settingsService;
+    private me.playbosswar.tea.core.impl.settings.SettingsStore settingsStore;
+    private me.playbosswar.tea.core.impl.arena.Hosting hosting;
+    private me.playbosswar.tea.core.impl.map.SharedFiles sharedFiles;
+
+    /** Null when {@code maps.storage: files}. */
+    public me.playbosswar.tea.core.impl.map.SharedFiles sharedFiles() {
+        return sharedFiles;
+    }
+
+    private void pushSharedFiles() {
+        var files = sharedFiles;
+        if (files == null || !isEnabled()) {
+            return;
+        }
+        getServer().getScheduler().runTaskAsynchronously(this, () -> {
+            if (files.push() && coordinationBackend != null) {
+                coordinationBackend.publishEvent(new me.playbosswar.tea.core.api.coordination.CoordinationEvent(
+                        me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.MAPS_CHANGED,
+                        coordinationBackend.serverId(), null, null, null, null, null, null, null, null, null,
+                        0, -1, null));
+            }
+        });
+    }
+
+    private void onSharedFilesEvent(me.playbosswar.tea.core.api.coordination.CoordinationEvent e) {
+        if (e.type() != me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.MAPS_CHANGED
+                || e.serverId().equals(coordinationBackend.serverId()) || !isEnabled()) {
+            return;
+        }
+        getServer().getScheduler().runTaskAsynchronously(this, () -> {
+            if (sharedFiles.pull().isEmpty()) {
+                return;
+            }
+            getServer().getScheduler().runTask(this, () -> {
+                getLogger().info("Maps or waiting rooms changed on " + e.serverId() + "; reloaded them.");
+                reloadMapsFromDisk();
+                if (arenaManager != null) {
+                    arenaManager.waitingRooms().load();
+                }
+            });
+        });
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.settings.SettingsService settings() {
+        return settingsService;
+    }
+
+    public me.playbosswar.tea.core.impl.settings.SettingsServiceImpl settingsService() {
+        return settingsService;
+    }
+
     @Override
     public me.playbosswar.tea.core.api.menu.MenuService menus() {
         return menuService;
+    }
+
+    private me.playbosswar.tea.core.impl.npc.NpcServiceImpl npcService;
+    private me.playbosswar.tea.core.api.platform.Platform platform;
+
+    @Override
+    public me.playbosswar.tea.core.api.platform.Platform platform() {
+        if (platform == null) {
+            platform = me.playbosswar.tea.core.impl.platform.Platforms.load(this);
+        }
+        return platform;
+    }
+
+    @Override
+    public me.playbosswar.tea.core.api.npc.NpcService npcs() {
+        return npcService;
     }
 
     @Override
@@ -829,8 +1052,6 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         for (String locale : BUNDLED_LOCALES) {
             saveResource("lang/" + locale + ".yml", false);
         }
-        // Surface any new keys the latest jar shipped without overwriting
-        // anything the admin already customized in their on-disk YAMLs.
         me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this);
         me.playbosswar.tea.core.api.util.ConfigSync.mergeMissingKeys(this, "theme.yml",
                 getDataFolder().toPath().resolve("theme.yml"));
@@ -838,7 +1059,6 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 getDataFolder().toPath().resolve("sidebar.yml"));
     }
 
-    /** (Re)reads plugins/TeaCore/sidebar.yml (the lobby sidebar layout). */
     private void loadSidebarYaml() {
         this.sidebarYaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(
                 getDataFolder().toPath().resolve("sidebar.yml").toFile());
@@ -857,5 +1077,129 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             bundles.put(locale, LocaleBundleLoader.load(this, dataFolder, locale));
         }
         return bundles;
+    }
+
+    private me.playbosswar.tea.core.impl.quest.QuestService quests;
+
+    public me.playbosswar.tea.core.impl.quest.QuestService quests() {
+        return quests;
+    }
+
+    private void registerQuests() {
+        quests = new me.playbosswar.tea.core.impl.quest.QuestService(this, this, databaseService.dataSource(),
+                getLogger());
+        quests.load();
+        getServer().getPluginManager().registerEvents(quests, this);
+        quests.register(menuService);
+        menuService.registerMenu(this, "menus/quests.yml");
+        for (org.bukkit.entity.Player p : getServer().getOnlinePlayers()) {
+            quests.load(p.getUniqueId());
+        }
+        getServer().getScheduler().runTaskTimerAsynchronously(this, quests::cleanUp, 20L * 60, 20L * 60 * 60 * 6);
+        PluginCommand command = getCommand("quests");
+        if (command == null) {
+            return;
+        }
+        command.setExecutor((sender, cmd, label, args) -> {
+            if (!(sender instanceof org.bukkit.entity.Player player)) {
+                messageService.sendToSender(sender, "core.command.player-only");
+                return true;
+            }
+            if (!quests.enabled()) {
+                messageService.send(player, "core.quests.off");
+                return true;
+            }
+            if (menuService.open(player, "quests", java.util.Map.of())) {
+                return true;
+            }
+            for (boolean weekly : new boolean[] {false, true}) {
+                for (var q : quests.questsOf(player.getUniqueId(), weekly)) {
+                    messageService.send(player, "core.quests.line", java.util.Map.of(
+                            "quest", q.name(), "progress", String.valueOf(quests.progressOf(player.getUniqueId(), q)),
+                            "amount", String.valueOf(q.amount()), "reward", quests.rewardText(q),
+                            "period", weekly ? "weekly" : "daily"));
+                }
+            }
+            return true;
+        });
+    }
+
+    private void registerLeaderboard() {
+        menuService.registerMenu(this, "menus/leaderboard.yml");
+        menuService.registerSource("leaderboard", (viewer, args) -> {
+            String game = args.get("game");
+            if (game == null || game.isBlank()) {
+                return List.of();
+            }
+            List<me.playbosswar.tea.core.api.menu.MenuEntry> out = new java.util.ArrayList<>();
+            for (var row : ratings.leaderboard(me.playbosswar.tea.core.api.game.GameId.of(game), 45)) {
+                out.add(me.playbosswar.tea.core.api.menu.MenuEntry.of(java.util.Map.of(
+                        "rank", String.valueOf(row.rank()), "player", row.name(), "uuid", row.uuid().toString(),
+                        "rating", String.valueOf(row.rating()), "games", String.valueOf(row.games()),
+                        "wins", String.valueOf(row.wins()), "losses", String.valueOf(row.losses()))));
+            }
+            return out;
+        });
+        PluginCommand command = getCommand("leaderboard");
+        if (command == null) {
+            return;
+        }
+        command.setExecutor((sender, cmd, label, args) -> {
+            if (args.length < 1) {
+                messageService.sendToSender(sender, "core.ranked.leaderboard.usage");
+                return true;
+            }
+            me.playbosswar.tea.core.api.game.GameId game;
+            try {
+                game = me.playbosswar.tea.core.api.game.GameId.of(args[0].toLowerCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                messageService.sendToSender(sender, "core.ranked.leaderboard.usage");
+                return true;
+            }
+            getServer().getScheduler().runTaskAsynchronously(this, () -> {
+                var rows = ratings.leaderboard(game, 45);
+                getServer().getScheduler().runTask(this, () -> {
+                    String name = arenaValues.gameName(messageService.defaultLocale(), game);
+                    if (sender instanceof org.bukkit.entity.Player p && menuService.open(p, "leaderboard",
+                            java.util.Map.of("game", game.value(), "game_name", name))) {
+                        return;
+                    }
+                    if (rows.isEmpty()) {
+                        messageService.sendToSender(sender, "core.ranked.leaderboard.empty",
+                                java.util.Map.of("game", name));
+                        return;
+                    }
+                    messageService.sendToSender(sender, "core.ranked.leaderboard.header", java.util.Map.of("game", name));
+                    for (var row : rows.subList(0, Math.min(10, rows.size()))) {
+                        messageService.sendToSender(sender, "core.ranked.leaderboard.line", java.util.Map.of(
+                                "rank", String.valueOf(row.rank()), "player", row.name(),
+                                "rating", String.valueOf(row.rating()), "wins", String.valueOf(row.wins()),
+                                "losses", String.valueOf(row.losses())));
+                    }
+                });
+            });
+            return true;
+        });
+        command.setTabCompleter((sender, cmd, label, args) -> args.length != 1 ? List.of()
+                : coordinationBackend.allHostedGames().stream().map(g -> g.value())
+                        .filter(v -> v.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).sorted().toList());
+    }
+
+    private void setUpBedrockForms() {
+        String simulate = System.getProperty("tea.bedrock.simulate", "");
+        if (!simulate.isBlank()) {
+            me.playbosswar.tea.core.impl.menu.bedrock.SimulatedBridge bridge =
+                    new me.playbosswar.tea.core.impl.menu.bedrock.SimulatedBridge(this, simulate);
+            getServer().getPluginManager().registerEvents(bridge, this);
+            menuService.setBedrock(bridge);
+            getLogger().info("Bedrock forms: simulated for " + simulate);
+        } else if (getServer().getPluginManager().isPluginEnabled("floodgate")) {
+            try {
+                menuService.setBedrock(new me.playbosswar.tea.core.impl.menu.bedrock.FloodgateBridge(this));
+                getLogger().info("Bedrock forms: on (Floodgate found)");
+            } catch (LinkageError e) {
+                getLogger().warning("Floodgate found but its API could not be loaded; Bedrock players get chest menus");
+            }
+        }
     }
 }

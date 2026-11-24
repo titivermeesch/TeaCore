@@ -1,0 +1,23 @@
+# Yes/no question opened by the confirm action:
+#   confirm:<question>|<action to run on yes>
+# {label} is the question. "Yes" runs the action in the menu the question came
+# from; "No" goes back. With this menu disabled, confirm actions run at once.
+enabled: true
+title: "<warning>Are you sure?"
+rows: 3
+pattern:
+  - "#########"
+  - "##Y#Q#N##"
+  - "#########"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'Q': { material: PAPER, name: "<primary>{label}" }
+  'Y':
+    material: LIME_CONCRETE
+    name: "<success>Yes"
+    actions: ["confirm-yes", "sound:UI_BUTTON_CLICK"]
+  'N':
+    material: RED_CONCRETE
+    name: "<error>No"
+    show-without-history: true
+    actions: ["back"]

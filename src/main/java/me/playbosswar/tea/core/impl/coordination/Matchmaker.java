@@ -26,22 +26,8 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
- * Drains queue entries into matching arenas. Every server runs its own
- * matchmaker tick — each one only handles entries for players that are
- * currently online on its instance, so no leader election is needed and
- * dequeues never race. Routing into a remote arena is done via the
- * {@code BungeeCord:Connect} plugin-message channel from the player's local
- * server.
- *
- * <p>For each queued player local to this server:
- * <ol>
- * <li>Find an arena with available capacity and matching map filter
- * (cluster-wide via {@link CoordinationBackend#allArenas()}).</li>
- * <li>If on the same server as the arena, directly
- * {@link ArenaManager#addPlayer}.</li>
- * <li>Otherwise, send a {@code BungeeCord:Connect} message to move the
- * player.</li>
- * </ol>
+ * Every server runs its own tick and only handles entries for players online
+ * on it, so no leader election is needed and dequeues never race.
  */
 public final class Matchmaker implements Listener {
 
@@ -50,15 +36,15 @@ public final class Matchmaker implements Listener {
     private final GameRegistry games;
     private final ArenaManagerImpl localArenas;
     private final ProxyTransport transport;
-    /**
-     * Players we've recently sent {@code BungeeCord:Connect} for, mapped to
-     * the moment we sent it. The disconnect listener checks this before
-     * dequeueing on quit so a legitimate proxy hop doesn't lose its queue
-     * entry. Entries older than the grace window are treated as expired
-     * (handled in {@link #wasRecentlyRouted}).
-     */
+    // Checked by the disconnect listener so a proxy hop doesn't lose its queue entry.
     private final ConcurrentHashMap<UUID, Instant> recentlyRouted = new ConcurrentHashMap<>();
+    private static final Duration STALE_ROUTE = Duration.ofSeconds(30);
     private BukkitTask task;
+    private volatile me.playbosswar.tea.core.impl.rating.RatingService ratings;
+
+    public void setRatings(me.playbosswar.tea.core.impl.rating.RatingService ratings) {
+        this.ratings = ratings;
+    }
 
     public Matchmaker(Plugin plugin, CoordinationBackend backend, GameRegistry games,
             ArenaManagerImpl localArenas, ProxyTransport transport) {
@@ -76,16 +62,7 @@ public final class Matchmaker implements Listener {
     }
 
     /**
-     * Whether this server's matchmaker has issued a {@code BungeeCord:Connect}
-     * for the given player within the supplied grace window. Used by the
-     * disconnect listener to recognize a proxy hop and skip the queue dequeue
-     * — without this, a player getting routed to another server has their
-     * entry erased the moment they leave the lobby, and the destination
-     * server has nothing to act on when they arrive.
-     *
-     * <p>
-     * Looking up an expired entry has a side effect: the entry is removed.
-     * That keeps the map bounded; nothing else cleans it up.
+     * Looking up an expired entry removes it. Nothing else keeps the map bounded.
      */
     public boolean wasRecentlyRouted(UUID playerUuid, Duration grace) {
         if (playerUuid == null) return false;
@@ -106,11 +83,8 @@ public final class Matchmaker implements Listener {
     }
 
     private void tick() {
-        // Collect the union of locally-registered games and games appearing in
-        // any cluster-wide arena snapshot. The lobby usually has no game
-        // plugin installed, but it still hosts queued players for those games,
-        // so we have to look at the fleet-wide arena set to know which queues
-        // to walk.
+        // The lobby usually has no game plugin installed but still holds queued
+        // players, so also include games seen in cluster-wide arena snapshots.
         Set<GameId> gameIds = new HashSet<>();
         games.all().forEach(def -> gameIds.add(def.id()));
         for (ArenaSnapshot snap : backend.allArenas()) gameIds.add(snap.gameId());
@@ -127,17 +101,8 @@ public final class Matchmaker implements Listener {
     }
 
     /**
-     * Pre-spawn hook: fires before Bukkit places the player in any world,
-     * so we can override the spawn location to land directly inside the
-     * arena's waiting room. Without this, a cross-server-routed player
-     * materializes at the destination server's default world spawn
-     * (overworld) for a frame before {@link #onPlayerJoin} schedules a
-     * teleport into the arena — that frame is the visible flicker.
-     *
-     * <p>Only acts when the player has a queue entry AND the matchmaker
-     * picks a LOCAL arena. Remote routing is handled the usual way through
-     * {@link #onPlayerJoin}; for those we don't fight Bukkit over the
-     * spawn location.
+     * Sets the spawn to the local arena's waiting room before Bukkit places the
+     * player, otherwise a routed player shows at the world spawn for one frame.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreSpawn(PlayerSpawnLocationEvent event) {
@@ -154,15 +119,8 @@ public final class Matchmaker implements Listener {
     }
 
     /**
-     * Player-just-joined-this-server hook. The proxy hop ends with a
-     * {@link PlayerJoinEvent}; if the player has a queue entry waiting, route
-     * them on the next tick (so Bukkit finishes initializing them) instead of
-     * making them wait up to a full second for the next matchmaker tick.
-     *
-     * <p>Combined with {@link #onPreSpawn}, the player materializes at the
-     * arena's waiting spawn directly, then 1 tick later this handler fires
-     * {@code addPlayer} so they get registered in arena state and any
-     * per-game starter items / scoreboard / etc. attach.
+     * Routes on the next tick, once Bukkit has initialized the player, instead of
+     * waiting for the next matchmaker tick.
      */
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
@@ -173,15 +131,19 @@ public final class Matchmaker implements Listener {
         }, 1L);
     }
 
-    /**
-     * Process a single queue entry: skip if the player isn't local, dequeue
-     * if they're already in an arena, otherwise pick a target arena and
-     * either route them locally (addPlayer) or via BungeeCord:Connect to a
-     * remote server.
-     */
     private void tryRoute(QueueEntry entry) {
         Player player = Bukkit.getPlayer(entry.playerUuid());
         if (player == null) {
+            // The destination server never picked the entry up (it dequeues on arrival),
+            // so the player never arrived. Drop it, or it re-routes them on reconnect.
+            Instant routedAt = recentlyRouted.get(entry.playerUuid());
+            if (routedAt != null && Duration.between(routedAt, Instant.now()).compareTo(STALE_ROUTE) > 0) {
+                recentlyRouted.remove(entry.playerUuid());
+                backend.dequeue(entry.playerUuid());
+                plugin.getLogger().info("[mm]   " + entry.playerName()
+                        + " never arrived after being routed; dequeueing");
+                return;
+            }
             plugin.getLogger().info("[mm]   " + entry.playerName() + "/" + entry.playerUuid()
                     + " not local on this server (server-id=" + backend.serverId() + "); skipping");
             return;
@@ -214,10 +176,16 @@ public final class Matchmaker implements Listener {
         }
 
         ArenaSnapshot snapshot = target.get();
+        if (entry.partyId() != null) {
+            partyArenas.put(entry.partyId(), java.util.Map.entry(snapshot.arenaId(), Instant.now()));
+        }
         if (snapshot.serverId().equals(backend.serverId())) {
             plugin.getLogger().info("[mm]   routing " + player.getName()
                     + " to LOCAL arena " + snapshot.arenaId().value().toString().substring(0, 8));
             localArenas.get(snapshot.arenaId()).ifPresent(arena -> {
+                if (ratings != null) {
+                    ratings.intend(player.getUniqueId(), entry.ranked());
+                }
                 if (localArenas.addPlayer(arena.id(), player, false)) {
                     backend.dequeue(entry.playerUuid());
                 } else {
@@ -231,25 +199,41 @@ public final class Matchmaker implements Listener {
                     + " to REMOTE server '" + snapshot.serverId() + "' (arena "
                     + snapshot.arenaId().value().toString().substring(0, 8)
                     + ") via BungeeCord:Connect");
-            // Mark as in-flight BEFORE sending the Connect, since the
-            // PlayerQuitEvent fires shortly after as the proxy moves them off
-            // this server. The disconnect listener checks this map and skips
-            // the dequeue. Don't dequeue here either — the destination
-            // server will dequeue when it processes the join.
+            // Marked before sending Connect because PlayerQuitEvent follows shortly and the
+            // disconnect listener checks this map. The destination server dequeues on join.
             recentlyRouted.put(player.getUniqueId(), Instant.now());
             transport.connect(player, snapshot.serverId());
         }
     }
 
+    /** Where each party's first member went, so the rest follow (party id -> arena, time). */
+    private final ConcurrentHashMap<String, java.util.Map.Entry<me.playbosswar.tea.core.api.arena.ArenaId, Instant>>
+            partyArenas = new ConcurrentHashMap<>();
+
     private Optional<ArenaSnapshot> pickArena(QueueEntry entry) {
+        if (entry.partyId() != null) {
+            var placed = partyArenas.get(entry.partyId());
+            if (placed != null && Duration.between(placed.getValue(), Instant.now()).toSeconds() < 30) {
+                for (ArenaSnapshot snapshot : backend.allArenas()) {
+                    if (snapshot.arenaId().equals(placed.getKey()) && snapshot.isAvailable()) {
+                        return Optional.of(snapshot);
+                    }
+                }
+            }
+        }
+        int room = Math.max(1, entry.partySize());
         ArenaSnapshot best = null;
         int bestPlayers = -1;
         for (ArenaSnapshot snapshot : backend.allArenas()) {
+            if (snapshot.players() + room > snapshot.maxPlayers())
+                continue;
             if (!snapshot.gameId().equals(entry.gameId()))
                 continue;
             if (!snapshot.isAvailable())
                 continue;
             if (!entry.acceptsAnyMap() && !entry.mapIds().contains(snapshot.mapId()))
+                continue;
+            if (!snapshot.acceptsRanked(entry.ranked(), entry.rating()))
                 continue;
             if (snapshot.players() > bestPlayers) {
                 best = snapshot;

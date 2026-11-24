@@ -31,25 +31,15 @@ import org.bukkit.plugin.Plugin;
  */
 public interface LootService {
 
-    /**
-     * Registers a provider for custom items under {@code namespace}.
-     *
-     * @param namespace lower-case namespace, e.g. {@code fireball}.
-     * @param provider  builds items for ids in that namespace.
-     */
+    /** @param namespace lower-case, e.g. {@code fireball} */
     void registerItemProvider(String namespace, LootItemProvider provider);
 
     /**
-     * Parses {@code section} into a table and registers it as {@code id},
-     * replacing any table with that id (so it can be called again on reload).
-     *
-     * @param owner   plugin that owns the table, used for warnings.
-     * @param id      table id, e.g. {@code fireball:chests}.
-     * @param section the table's config section.
-     * @return the registered table.
+     * Parses {@code section} and registers it as {@code id} (e.g.
+     * {@code fireball:chests}), replacing any existing table, so it is safe to
+     * call again on reload. {@code owner} is used for warnings.
      */
     LootTable registerTable(Plugin owner, String id, ConfigurationSection section);
 
-    /** Looks up a registered table. */
     Optional<LootTable> table(String id);
 }

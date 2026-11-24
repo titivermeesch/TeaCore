@@ -8,8 +8,6 @@ import me.playbosswar.tea.core.api.arena.ArenaPlayerJoinEvent;
 import me.playbosswar.tea.core.api.arena.ArenaPlayerLeaveEvent;
 import me.playbosswar.tea.core.impl.sidebar.PapiBridge;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -21,35 +19,25 @@ import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
-import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Lobby hotbar items from {@code lobby.hotbar.items} (e.g. a compass that opens
- * the play menu). Given on join, respawn and when leaving an arena, removed
- * when joining one, and locked in place. Needs {@code lobby.enabled} and
- * {@code features.lobby-hotbar}.
- */
 public final class LobbyHotbarService implements Listener {
 
     private final Plugin plugin;
     private final TeaCoreAPI core;
-    private final NamespacedKey key;
 
     public LobbyHotbarService(Plugin plugin, TeaCoreAPI core) {
         this.plugin = plugin;
         this.core = core;
-        this.key = new NamespacedKey(plugin, "lobby_item");
+        me.playbosswar.tea.core.impl.platform.LockedItems.register(this::isLobbyItem);
     }
 
     private boolean active() {
         return plugin.getConfig().getBoolean("lobby.enabled", false) && core.features().enabled("lobby-hotbar");
     }
 
-    /** Gives the configured items unless the player is in an arena. */
     public void give(Player player) {
         if (!player.isOnline() || core.arenas().arenaOf(player.getUniqueId()).isPresent()) {
             return;
@@ -64,11 +52,10 @@ public final class LobbyHotbarService implements Listener {
                 continue;
             }
             ConfigurationSection s = new org.bukkit.configuration.MemoryConfiguration().createSection("i", raw);
-            Material material = Material.matchMaterial(s.getString("material", "COMPASS"));
-            if (material == null) {
+            ItemStack stack = core.platform().items().stack(s.getString("material", "COMPASS"), 1).orElse(null);
+            if (stack == null) {
                 continue;
             }
-            ItemStack stack = new ItemStack(material);
             ItemMeta meta = stack.getItemMeta();
             if (meta == null) {
                 continue;
@@ -85,13 +72,12 @@ public final class LobbyHotbarService implements Listener {
             // never makes an old item do something else.
             String action = s.isString("menu") ? "menu:" + s.getString("menu")
                     : s.isString("command") ? "command:" + s.getString("command") : "";
-            meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, action);
             stack.setItemMeta(meta);
+            stack = me.playbosswar.tea.core.impl.platform.TeaTags.set(stack, "lobby_item", action);
             player.getInventory().setItem(Math.max(0, Math.min(8, s.getInt("slot", i))), stack);
         }
     }
 
-    /** Removes every lobby item from the player's inventory. */
     public void take(Player player) {
         ItemStack[] contents = player.getInventory().getContents();
         for (int slot = 0; slot < contents.length; slot++) {
@@ -102,8 +88,7 @@ public final class LobbyHotbarService implements Listener {
     }
 
     private boolean isLobbyItem(ItemStack item) {
-        return item != null && item.hasItemMeta()
-                && item.getItemMeta().getPersistentDataContainer().has(key, PersistentDataType.STRING);
+        return me.playbosswar.tea.core.impl.platform.TeaTags.marked(item, "lobby_item");
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -141,7 +126,7 @@ public final class LobbyHotbarService implements Listener {
             take(player); // the feature was turned off: clean up old items
             return;
         }
-        String action = item.getItemMeta().getPersistentDataContainer().get(key, PersistentDataType.STRING);
+        String action = me.playbosswar.tea.core.impl.platform.TeaTags.get(item, "lobby_item");
         if (action.startsWith("menu:")) {
             core.menus().open(player, action.substring(5), Map.of());
         } else if (action.startsWith("command:")) {
@@ -160,13 +145,6 @@ public final class LobbyHotbarService implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent event) {
         if (isLobbyItem(event.getItemDrop().getItemStack())) {
-            event.setCancelled(true);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onSwap(PlayerSwapHandItemsEvent event) {
-        if (isLobbyItem(event.getMainHandItem()) || isLobbyItem(event.getOffHandItem())) {
             event.setCancelled(true);
         }
     }

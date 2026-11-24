@@ -1,20 +1,20 @@
 package me.playbosswar.tea.core.api.map;
 
+import java.util.List;
+import org.bukkit.Color;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 
 /**
- * Ready-made {@link MapExtension} for games whose data is a single named
- * {@link SpawnPoint} (ceremony camera, boss pad, respawn room, ...).
+ * Ready-made {@link MapExtension} for a single named {@link SpawnPoint}
+ * (ceremony camera, boss pad, respawn room, ...).
  *
  * <p>
- * {@code handleCommand} captures the player's current location (including yaw
- * and pitch) and stores it on the draft. Persistence writes
- * {@code {x, y, z, yaw, pitch}} keys under the extension's YAML section, and
- * coordinates round-trip correctly between authoring (absolute in edit-world)
- * and stored (relative to the map's min-corner). Games instantiate one per
- * spawn:
+ * The subcommand stores the player's current location, including yaw and
+ * pitch. Stored coordinates are relative to the map's min corner. Register one
+ * per spawn:
  *
  * <pre>{@code
  * public static final MapExtensionKey<SpawnPoint> EVOLUTION_VIEWER =
@@ -34,20 +34,18 @@ public final class SpawnPointExtension implements MapExtension<SpawnPoint> {
     private final String subcommand;
     private final boolean required;
     private final String statusLabel;
+    private final Material icon;
+    private final Color color;
 
     private SpawnPointExtension(Builder b) {
         this.key = b.key;
         this.subcommand = b.subcommand;
         this.required = b.required;
         this.statusLabel = b.statusLabel == null ? b.key.id() : b.statusLabel;
+        this.icon = b.icon == null ? Material.ARMOR_STAND : b.icon;
+        this.color = b.color == null ? Color.AQUA : b.color;
     }
 
-    /**
-     * Starts building a spawn-point extension for the given key.
-     *
-     * @param key the typed key; must not be {@code null}.
-     * @return a new builder.
-     */
     public static Builder builder(MapExtensionKey<SpawnPoint> key) {
         return new Builder(key);
     }
@@ -115,63 +113,78 @@ public final class SpawnPointExtension implements MapExtension<SpawnPoint> {
     }
 
     @Override
+    public List<SpawnPoint> points(SpawnPoint value) {
+        return List.of(value);
+    }
+
+    @Override
+    public SpawnPoint removePoint(SpawnPoint value, int index) {
+        return null;
+    }
+
+    @Override
+    public SpawnPoint placePoint(SpawnPoint current, SpawnPoint point) {
+        return new SpawnPoint(key.id(), point.x(), point.y(), point.z(), point.yaw(), point.pitch());
+    }
+
+    @Override
+    public Material editorIcon() {
+        return icon;
+    }
+
+    @Override
+    public Color markerColor() {
+        return color;
+    }
+
+    @Override
     public String describeValue(SpawnPoint value) {
         return String.format("%.2f/%.2f/%.2f", value.x(), value.y(), value.z());
     }
 
-    /**
-     * Fluent builder for {@link SpawnPointExtension}.
-     */
     public static final class Builder {
         private final MapExtensionKey<SpawnPoint> key;
         private String subcommand;
         private boolean required;
         private String statusLabel;
+        private Material icon;
+        private Color color;
 
         private Builder(MapExtensionKey<SpawnPoint> key) {
             this.key = key;
         }
 
-        /**
-         * Sets the {@code /tea map} subcommand token.
-         *
-         * @param s subcommand; must not be {@code null}.
-         * @return this builder.
-         */
+        /** The {@code /tea map} subcommand token. Required. */
         public Builder subcommand(String s) {
             this.subcommand = s;
             return this;
         }
 
-        /**
-         * Marks the extension as required for save validation.
-         *
-         * @param v {@code true} to require the spawn be set before save.
-         * @return this builder.
-         */
+        /** If true, the map cannot be saved until this spawn is set. */
         public Builder required(boolean v) {
             this.required = v;
             return this;
         }
 
-        /**
-         * Sets a short label shown in {@code /tea map status} (defaults to the
-         * extension id when omitted).
-         *
-         * @param s status label.
-         * @return this builder.
-         */
+        /** Label shown in {@code /tea map status}. Defaults to the key id. */
         public Builder statusLabel(String s) {
             this.statusLabel = s;
             return this;
         }
 
-        /**
-         * Builds the extension.
-         *
-         * @return a new {@link SpawnPointExtension}.
-         * @throws IllegalStateException if {@code subcommand} has not been set.
-         */
+        /** Item shown for this point in the map editor. Default {@code ARMOR_STAND}. */
+        public Builder icon(Material icon) {
+            this.icon = icon;
+            return this;
+        }
+
+        /** Particle colour of this point's marker. Default aqua. */
+        public Builder markerColor(Color color) {
+            this.color = color;
+            return this;
+        }
+
+        /** @throws IllegalStateException if {@code subcommand} was not set */
         public SpawnPointExtension build() {
             if (subcommand == null) {
                 throw new IllegalStateException("SpawnPointExtension.subcommand is required");

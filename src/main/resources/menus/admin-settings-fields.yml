@@ -1,0 +1,32 @@
+# The settings of one category (arguments: file, category). Per setting:
+# {file} {path} {title} {value} {info} (help, when it takes effect)
+# {controls} (what each click does).
+enabled: true
+permission: tea.settings
+title: "<primary>Settings"
+rows: 6
+pattern:
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: "open-menu:admin-settings-file file={file}" }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'F':
+    source: settings-fields
+    item:
+      name: "<primary>{title}"
+      lore:
+        - "<secondary>Now: <highlight>{value}"
+        - "<muted>{info}"
+        - ""
+        - "<success>{controls}"
+      actions: ["settings-field:{file}|{path}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No settings" }

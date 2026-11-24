@@ -12,10 +12,6 @@ import me.playbosswar.tea.core.api.map.MapExtensionRegistry;
 
 public final class MapExtensionRegistryImpl implements MapExtensionRegistry {
 
-    /**
-     * Built-in {@code /tea map} subcommand tokens that third-party extensions
-     * must not shadow.
-     */
     private static final Set<String> RESERVED_SUBCOMMANDS = Set.of(
             "create", "edit", "pos1", "pos2", "waiting", "addspawn", "clearspawns",
             "status", "min", "max", "save", "discard", "list", "info", "reload", "delete",
@@ -64,13 +60,6 @@ public final class MapExtensionRegistryImpl implements MapExtensionRegistry {
         return Collections.unmodifiableCollection(byId.values());
     }
 
-    /**
-     * Looks up an extension by id without requiring a typed key. Used by
-     * persistence code that only has the YAML section name.
-     *
-     * @param id extension id.
-     * @return the extension, or empty if not registered.
-     */
     public Optional<MapExtension<?>> byId(String id) {
         return Optional.ofNullable(byId.get(id));
     }

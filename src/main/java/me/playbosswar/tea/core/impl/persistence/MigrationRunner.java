@@ -33,8 +33,56 @@ public final class MigrationRunner {
         this.logger = logger;
     }
 
+    private static final int LOCK_TIMEOUT_SECONDS = 120;
+
     public void apply(Plugin plugin, String namespace, List<String> filenames) {
         ensureVersionsTable();
+        // Servers sharing one MySQL database can start together. A named lock, held on
+        // its own connection for the whole run, makes them take turns; the waiter
+        // re-reads what is applied so nothing runs twice. SQLite needs no lock.
+        try (Connection lock = dataSource.getConnection()) {
+            boolean mysql = isMySql(lock);
+            if (mysql) {
+                acquire(lock, namespace);
+            }
+            try {
+                applyUnlocked(plugin, namespace, filenames);
+            } finally {
+                if (mysql) {
+                    release(lock);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to run migrations for " + namespace, e);
+        }
+    }
+
+    private static boolean isMySql(Connection c) throws SQLException {
+        String product = c.getMetaData().getDatabaseProductName().toLowerCase(java.util.Locale.ROOT);
+        return product.contains("mysql") || product.contains("mariadb");
+    }
+
+    private void acquire(Connection c, String namespace) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT GET_LOCK('tea_migrations', ?)")) {
+            ps.setInt(1, LOCK_TIMEOUT_SECONDS);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next() || rs.getInt(1) != 1) {
+                    throw new SQLException("Timed out after " + LOCK_TIMEOUT_SECONDS
+                            + "s waiting for another server's migrations (" + namespace + ")");
+                }
+            }
+        }
+    }
+
+    private void release(Connection c) {
+        try (Statement s = c.createStatement()) {
+            s.execute("SELECT RELEASE_LOCK('tea_migrations')");
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Could not release the migration lock", e);
+        }
+    }
+
+    private void applyUnlocked(Plugin plugin, String namespace, List<String> filenames) {
         Set<Integer> applied = loadAppliedVersions(namespace);
 
         List<MigrationFile> sorted = filenames.stream()

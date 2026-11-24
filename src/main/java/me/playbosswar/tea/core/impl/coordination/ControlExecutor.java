@@ -12,14 +12,8 @@ import me.playbosswar.tea.core.impl.TeaCorePlugin;
 import org.bukkit.Bukkit;
 
 /**
- * Executes {@link ControlCommand}s received from the coordination backend
- * against the local {@link ArenaManager} / map services.
- *
- * <p>
- * Registered on every backend so the dashboard (running on the lobby) can reach
- * any arena-hosting pod by target {@code serverId}. Incoming commands arrive on
- * a Lettuce pub/sub thread; Bukkit mutations are scheduled on the main thread
- * with {@link org.bukkit.scheduler.BukkitScheduler#runTask}.
+ * Commands arrive on a Lettuce pub/sub thread, so Bukkit mutations are
+ * scheduled on the main thread.
  */
 public final class ControlExecutor {
 
@@ -61,14 +55,34 @@ public final class ControlExecutor {
             case END_MATCH -> {
                 ArenaId id = parseArena(cmd);
                 if (id == null || arenas.get(id).isEmpty()) return;
-                UUID winner = null;
-                if (cmd.playerUuid() != null && !cmd.playerUuid().isBlank()) {
-                    try {
-                        winner = UUID.fromString(cmd.playerUuid());
-                    } catch (IllegalArgumentException ignored) {
-                    }
+                plugin.arenaAdmin().endLocal(id, cmd.teamId(), cmd.playerUuid());
+            }
+            case KICK_PLAYER -> {
+                UUID player = parseUuid(cmd.playerUuid());
+                if (player != null) plugin.arenaAdmin().kickLocal(player);
+            }
+            case MAKE_SPECTATOR -> {
+                ArenaId id = parseArena(cmd);
+                UUID player = parseUuid(cmd.playerUuid());
+                if (id != null && player != null) plugin.arenaAdmin().makeSpectatorLocal(id, player);
+            }
+            case MOVE_PLAYER -> {
+                UUID player = parseUuid(cmd.playerUuid());
+                if (player != null && cmd.targetArenaId() != null) {
+                    plugin.arenaAdmin().moveLocal(player, cmd.targetArenaId());
                 }
-                arenas.endMatch(id, winner);
+            }
+            case EXPECT_PLAYER -> {
+                ArenaId id = parseArena(cmd);
+                UUID player = parseUuid(cmd.playerUuid());
+                if (id != null && player != null && arenas.get(id).isPresent()) {
+                    plugin.arenaAdmin().expect(player, id, cmd.mode());
+                }
+            }
+            case APPLY_SETTINGS -> {
+                if (cmd.mode() != null && plugin.settingsService() != null) {
+                    plugin.settingsService().applyRemote(cmd.mode());
+                }
             }
             case ALLOCATE_ARENA -> {
                 if (cmd.gameId() == null || cmd.gameId().isBlank()) return;
@@ -77,8 +91,7 @@ public final class ControlExecutor {
                     logger.warning("ALLOCATE_ARENA for unknown game " + gameId.value());
                     return;
                 }
-                // No maps registered is a normal pre-setup state; report at FINE so
-                // we don't spam every retry while the operator is still authoring.
+                // No maps is normal before setup; log at FINE so retries don't spam.
                 if (plugin.maps().forGame(gameId).isEmpty()) {
                     logger.fine(() -> "ALLOCATE_ARENA for " + gameId.value()
                             + " skipped: no maps authored on this backend.");
@@ -87,14 +100,33 @@ public final class ControlExecutor {
                 arenas.allocate(gameId, cmd.mapId());
             }
             case RELOAD_MAPS -> plugin.reloadMaps();
+            case RESTORE_MAP -> {
+                if (cmd.gameId() == null || cmd.mapId() == null || cmd.mode() == null) return;
+                try {
+                    plugin.mapEditingService().restore(new GameId(cmd.gameId()), cmd.mapId(),
+                            Integer.parseInt(cmd.mode()), "dashboard");
+                } catch (Exception e) {
+                    logger.log(Level.WARNING, "Failed to restore map " + cmd.gameId() + "/" + cmd.mapId()
+                            + " to version " + cmd.mode() + ": " + e.getMessage());
+                }
+            }
             case DELETE_MAP -> {
                 if (cmd.gameId() == null || cmd.mapId() == null) return;
                 try {
-                    plugin.mapEditingService().delete(new GameId(cmd.gameId()), cmd.mapId());
+                    plugin.mapEditingService().delete(new GameId(cmd.gameId()), cmd.mapId(), "dashboard");
                 } catch (Exception e) {
                     logger.log(Level.WARNING, "Failed to delete map " + cmd.gameId() + "/" + cmd.mapId(), e);
                 }
             }
+        }
+    }
+
+    private static UUID parseUuid(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

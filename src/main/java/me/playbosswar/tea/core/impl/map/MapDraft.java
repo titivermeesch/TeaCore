@@ -12,15 +12,7 @@ import me.playbosswar.tea.core.api.map.MapExtensionKey;
 import me.playbosswar.tea.core.api.map.SpawnPoint;
 import org.bukkit.Location;
 
-/**
- * Mutable authoring state for a map. All coordinates (pos1, pos2, waitingSpawn,
- * participantSpawns,
- * extension values) are ABSOLUTE positions in the live edit world. On save,
- * they're converted
- * into deltas from the region's min-corner, and a fresh schematic is captured
- * between pos1 and
- * pos2.
- */
+/** Coordinates are absolute in the edit world; on save they become deltas from the region's min corner. */
 public final class MapDraft {
 
     private final UUID ownerUuid;
@@ -127,9 +119,6 @@ public final class MapDraft {
         this.displayName = (displayName == null || displayName.isBlank()) ? null : displayName;
     }
 
-    /**
-     * Returns an unmodifiable snapshot of extension values keyed by extension id.
-     */
     public Map<String, Object> extensions() {
         return Collections.unmodifiableMap(extensions);
     }

@@ -9,230 +9,90 @@ import me.playbosswar.tea.core.api.arena.ArenaId;
 import me.playbosswar.tea.core.api.game.GameId;
 
 /**
- * Coordination backend used to share arena state and queue entries across the Tea network.
+ * Shares arena state, queues and matchmaker leadership across the network.
+ * In-memory for standalone servers, Redis for proxied networks.
  *
- * <p>Two implementations ship with TeaCore: {@code InMemoryBackend} for single-server
- * setups and {@code RedisBackend} (via Lettuce) for proxy-routed networks.
- *
- * <p>The backend also mediates matchmaker leader election so only one server at a time
- * routes queued players into arenas. The current leader is expected to refresh the lock
- * periodically via {@link #tryAcquireMatchmakerLock()}.
- *
- * @apiNote All methods are thread-safe. Callers on the main thread should avoid blocking
- *          calls to the Redis backend; the in-memory backend is synchronous and fine.
+ * <p>All methods are thread-safe. Redis calls block, so avoid them on the main
+ * thread; the in-memory backend is synchronous.
  */
 public interface CoordinationBackend extends AutoCloseable {
 
-    /**
-     * Returns the identifier of the local backend server.
-     *
-     * @return the server id, never {@code null}.
-     */
     String serverId();
 
-    // --- Arena discovery ---
-
     /**
-     * Publishes or refreshes this server's view of one of its arenas.
-     *
-     * <p>Overwrites the previous snapshot for the same {@code (serverId, arenaId)} pair.
-     * Intended to be called at short intervals so stale entries expire naturally on the
-     * Redis side.
-     *
-     * @param snapshot the arena snapshot to publish; must not be {@code null}.
+     * Publishes or overwrites the snapshot for this arena. Call it at short
+     * intervals: on Redis, snapshots expire when not refreshed.
      */
     void publishArena(ArenaSnapshot snapshot);
 
-    /**
-     * Removes a snapshot once an arena is released.
-     *
-     * <p>No-op if no snapshot is currently published for that id.
-     *
-     * @param arenaId arena id to clear; must not be {@code null}.
-     */
+    /** No-op if no snapshot is published for {@code arenaId}. */
     void removeArena(ArenaId arenaId);
 
-    /**
-     * Returns every non-expired snapshot known across the network.
-     *
-     * @return a snapshot collection, never {@code null}.
-     */
+    /** Every non-expired snapshot across the network. */
     Collection<ArenaSnapshot> allArenas();
 
-    // --- Queue ---
-
-    /**
-     * Adds a player to the queue for a game.
-     *
-     * <p>No-op if the player is already queued for the same game with the same options.
-     *
-     * @param entry queue entry describing the player and their preferences; must not be
-     *              {@code null}.
-     */
+    /** No-op if the player is already queued for the same game with the same options. */
     void enqueue(QueueEntry entry);
 
-    /**
-     * Removes a player from any queue they are in.
-     *
-     * @param playerUuid player to dequeue; must not be {@code null}.
-     */
+    /** Removes the player from whichever queue they are in. */
     void dequeue(UUID playerUuid);
 
-    /**
-     * Returns queued entries for a game, oldest first.
-     *
-     * @param gameId game whose queue to read; must not be {@code null}.
-     * @return queue entries in FIFO order, never {@code null}.
-     */
+    /** Oldest first. */
     Collection<QueueEntry> queueFor(GameId gameId);
 
-    /**
-     * Returns the queue entry for a player, regardless of which game they are
-     * queued for.
-     *
-     * <p>
-     * Used by the queue bossbar service and other callers that need to find
-     * a player's entry without knowing the {@link GameId} ahead of time.
-     * Walks all queues; cheap when queues are short.
-     *
-     * @param playerUuid player to look up; must not be {@code null}.
-     * @return the entry, or empty if the player is not currently queued for
-     *         any game.
-     */
+    /** Searches every game's queue; empty if the player is not queued. */
     Optional<QueueEntry> queueEntryOf(UUID playerUuid);
 
-    /**
-     * Returns the zero-based position of a player in their queue.
-     *
-     * @param playerUuid player to look up; must not be {@code null}.
-     * @param gameId     game whose queue to inspect; must not be {@code null}.
-     * @return the position (0 = front of queue), or {@code -1} if the player is not queued
-     *         for this game.
-     */
+    /** Zero-based position, or {@code -1} if the player is not queued for this game. */
     int queuePosition(UUID playerUuid, GameId gameId);
 
-    // --- Leader election (matchmaker) ---
-
     /**
-     * Attempts to become, or refresh, the active matchmaker leader.
+     * Acquires or refreshes the matchmaker leader lock. Acquiring also extends
+     * its expiry, so call it periodically or another server takes over.
      *
-     * <p>Should be called periodically: acquiring the lock also extends its expiry, so
-     * missing a refresh lets another server take over. Safe to call when this server
-     * already holds the lock.
-     *
-     * @return {@code true} if we hold the lock after the call; {@code false} if another
-     *         server is the leader.
+     * @return {@code true} if this server holds the lock after the call
      */
     boolean tryAcquireMatchmakerLock();
 
-    /**
-     * Releases the matchmaker leader lock on shutdown.
-     *
-     * <p>No-op if the lock is not currently held by this server.
-     */
+    /** No-op if this server does not hold the lock. */
     void releaseMatchmakerLock();
 
-    // --- Hosted games (central-mode fleet discovery) ---
-
     /**
-     * Publishes the set of games this server is capable of hosting arenas
-     * for.
-     *
-     * <p>
-     * Used by the {@code central} arena-pool mode: the matchmaker leader
-     * needs to know which backends can accept a new arena for game X before
-     * publishing an {@link ControlCommand.Type#ALLOCATE_ARENA} command. Call
-     * on plugin enable once every game has registered, and refresh on a
-     * heartbeat so Redis entries don't TTL out.
-     *
-     * @param gameIds games this backend can host; must not be {@code null}.
+     * Declares which games this server can host arenas for, so the
+     * {@code central} pool leader knows where to send
+     * {@link ControlCommand.Type#ALLOCATE_ARENA}. Call once every game has
+     * registered and refresh on a heartbeat, or the Redis entry expires.
      */
     void publishHostedGames(Set<GameId> gameIds);
 
-    /**
-     * Returns the set of server ids that have declared they host the given
-     * game. Network-wide view populated from {@link #publishHostedGames(Set)}
-     * calls across the fleet.
-     *
-     * @param gameId game to look up; must not be {@code null}.
-     * @return server ids hosting this game, never {@code null}.
-     */
+    /** Server ids that declared {@code gameId} via {@link #publishHostedGames(Set)}. */
     Set<String> hostsOf(GameId gameId);
 
     /**
-     * Returns the union of every game id that any server in the fleet has
-     * declared via {@link #publishHostedGames(Set)}.
-     *
-     * <p>
-     * Used by the leader's pool manager so it can iterate fleet-wide game
-     * ids without having those games registered in its own
-     * {@link me.playbosswar.tea.core.api.game.GameRegistry}. In a split
-     * deployment the leader (typically the lobby) doesn't run any game
-     * plugins itself.
-     *
-     * @return all hosted game ids, never {@code null}.
+     * Every game id declared via {@link #publishHostedGames(Set)} across the
+     * network, including games not registered in this server's
+     * {@link me.playbosswar.tea.core.api.game.GameRegistry}.
      */
     Set<GameId> allHostedGames();
 
-    // --- Control plane (dashboard -> target backend) ---
-
     /**
-     * Sends a fire-and-forget control command to a specific backend server.
-     *
-     * <p>
-     * The dashboard uses this to reach arenas hosted by other pods; on the
-     * in-memory backend a local subscriber gets it synchronously, on the Redis
-     * backend it travels over pub/sub and arrives within a few ms. Delivery is
-     * best-effort: if no subscriber exists on the target server, the command is
-     * dropped.
-     *
-     * @param targetServerId destination backend's {@link #serverId()}; must
-     *                       not be {@code null}.
-     * @param command        the command to send; must not be {@code null}.
+     * Sends a command to one server. Best-effort: dropped if nothing on the
+     * target is subscribed. In-memory delivery is synchronous.
      */
     void publishControl(String targetServerId, ControlCommand command);
 
     /**
-     * Registers a handler that receives {@link ControlCommand}s targeted at
-     * <b>this</b> server only.
-     *
-     * <p>
-     * Multiple subscribers are allowed; each receives every incoming command.
-     * Handlers run on a backend-internal thread and must marshal to the
-     * Bukkit main thread themselves when touching Bukkit APIs.
-     *
-     * @param handler callback invoked for each received command; must not be
-     *                {@code null}.
+     * Receives commands addressed to this server. Handlers run on a
+     * backend thread; switch to the main thread before touching Bukkit.
      */
     void subscribeControl(Consumer<ControlCommand> handler);
 
-    // --- Event fan-out (any backend -> all subscribers) ---
-
-    /**
-     * Broadcasts an arena or match event to every backend on the network.
-     *
-     * <p>
-     * Used by each backend to mirror its local Bukkit events so the lobby's
-     * dashboard can fan them out to WebSocket clients without pulling per-pod
-     * APIs. Delivery is best-effort; transient Redis failures are logged and
-     * dropped.
-     *
-     * @param event the event to broadcast; must not be {@code null}.
-     */
+    /** Broadcasts to every server. Best-effort: Redis failures are logged and dropped. */
     void publishEvent(CoordinationEvent event);
 
-    /**
-     * Registers a handler that receives every {@link CoordinationEvent}
-     * broadcast on the network (including events this server published).
-     *
-     * @param handler callback invoked for each received event; must not be
-     *                {@code null}.
-     */
+    /** Receives every broadcast event, including ones this server published. */
     void subscribeEvents(Consumer<CoordinationEvent> handler);
 
-    /**
-     * Releases network resources (connections, threads) used by this backend.
-     */
     @Override
     void close();
 }

@@ -41,18 +41,14 @@ import org.bukkit.plugin.Plugin;
 public interface SidebarService {
 
     /**
-     * Shows {@code layout} to players in arenas of {@code game}. Call again to
-     * replace it (e.g. after a config reload).
+     * Shows {@code layout} to players in arenas of {@code game}. Calling again
+     * replaces it, e.g. after a config reload.
      *
-     * @param owner  the game plugin.
-     * @param game   the game the layout is for.
-     * @param layout the {@code sidebar} config section (see class docs).
-     * @param data   extra placeholders and loop rows from the game; may be
-     *               {@link SidebarData#NONE}.
+     * @param layout the {@code sidebar} config section described above.
+     * @param data   extra placeholders and loop rows, or {@link SidebarData#NONE}.
      */
     void registerGame(Plugin owner, GameId game, ConfigurationSection layout, SidebarData data);
 
-    /** Removes a game's layout (e.g. on disable). */
     void unregisterGame(GameId game);
 
     /**

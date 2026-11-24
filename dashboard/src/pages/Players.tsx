@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { PlayerProfile, PlayerRef } from '../types';
+import type { PlayerHistory, PlayerProfile, PlayerRef } from '../types';
+import { dateTime, duration } from '../lib/mc';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -14,15 +16,27 @@ export default function Players() {
     const [profile, setProfile] = useState<PlayerProfile | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [historyData, setHistoryData] = useState<PlayerHistory | null>(null);
+    const { uuid: routeUuid } = useParams();
+    const navigate = useNavigate();
 
     useEffect(() => {
         api<PlayerRef[]>('/api/players/online').then(setOnline).catch(() => {});
     }, []);
 
+    useEffect(() => {
+        if (routeUuid) {
+            setQuery(routeUuid);
+            load(routeUuid);
+        }
+    }, [routeUuid]); // eslint-disable-line react-hooks/exhaustive-deps
+
     async function load(uuid: string) {
         setBusy(true);
         setError(null);
         try {
+            setHistoryData(null);
+            api<PlayerHistory>(`/api/players/${uuid}/history`).then(setHistoryData).catch(() => {});
             const result = await api<PlayerProfile>(`/api/players/${uuid}`);
             setProfile(result);
         } catch (err) {
@@ -39,7 +53,7 @@ export default function Players() {
 
     function onSubmit(e: FormEvent) {
         e.preventDefault();
-        if (query.trim()) load(query.trim());
+        if (query.trim()) navigate(`/players/${query.trim()}`);
     }
 
     return (
@@ -73,10 +87,7 @@ export default function Players() {
                                     <li
                                         key={p.uuid}
                                         className="px-5 py-2 text-sm cursor-pointer hover:bg-bg-raised/50"
-                                        onClick={() => {
-                                            setQuery(p.uuid);
-                                            load(p.uuid);
-                                        }}
+                                        onClick={() => navigate(`/players/${p.uuid}`)}
                                     >
                                         <div className="font-medium">{p.name ?? p.uuid.slice(0, 8)}</div>
                                         <div className="font-mono text-xs text-muted">{p.uuid}</div>
@@ -87,7 +98,7 @@ export default function Players() {
                     </CardContent>
                 </Card>
                 <div className="lg:col-span-2">
-                    {profile ? <ProfileCard profile={profile} /> : (
+                    {profile ? <ProfileCard profile={profile} history={historyData} /> : (
                         <Card>
                             <CardContent className="text-sm text-muted">
                                 Paste a UUID and press Look up, or pick a player from the online list.
@@ -100,7 +111,7 @@ export default function Players() {
     );
 }
 
-function ProfileCard({ profile }: { profile: PlayerProfile }) {
+function ProfileCard({ profile, history }: { profile: PlayerProfile; history: PlayerHistory | null }) {
     return (
         <div className="space-y-4">
             <Card>
@@ -116,11 +127,44 @@ function ProfileCard({ profile }: { profile: PlayerProfile }) {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    <dl className="grid grid-cols-3 gap-4 text-sm">
+                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                         <Meta label="First seen" value={profile.firstSeen} />
                         <Meta label="Last seen" value={profile.lastSeen} />
                         <Meta label="Locale" value={profile.locale} />
                     </dl>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <div className="flex items-start justify-between">
+                        <CardTitle>Recent matches</CardTitle>
+                        {history && history.streak.count > 1 && history.streak.result !== 'none' && (
+                            <Badge variant={history.streak.result === 'win' ? 'success' : history.streak.result === 'loss' ? 'error' : 'muted'}>
+                                {history.streak.count} {({ win: 'wins', loss: 'losses', draw: 'draws', left: 'matches left early' } as Record<string, string>)[history.streak.result]} in a row
+                            </Badge>
+                        )}
+                    </div>
+                </CardHeader>
+                <CardContent className="px-0 pt-0">
+                    {!history || history.matches.length === 0 ? (
+                        <div className="px-5 py-3 text-sm text-muted">No finished matches.</div>
+                    ) : (
+                        <Table>
+                            <Thead><Tr><Th>Ended</Th><Th>Game</Th><Th>Map</Th><Th>Result</Th><Th>K/D/A</Th><Th>Duration</Th></Tr></Thead>
+                            <Tbody>
+                                {history.matches.map((m) => (
+                                    <Tr key={m.matchId}>
+                                        <Td><Link to={`/history/${m.matchId}`} className="text-primary hover:underline">{dateTime(m.endedAt)}</Link></Td>
+                                        <Td>{m.game}</Td>
+                                        <Td>{m.map ?? '-'}</Td>
+                                        <Td><Badge variant={m.result === 'win' ? 'success' : m.result === 'loss' ? 'error' : 'muted'}>{m.result}</Badge></Td>
+                                        <Td className="tabular-nums">{m.kills}/{m.deaths}/{m.assists}</Td>
+                                        <Td className="tabular-nums">{duration(m.durationSeconds)}</Td>
+                                    </Tr>
+                                ))}
+                            </Tbody>
+                        </Table>
+                    )}
                 </CardContent>
             </Card>
             {Object.keys(profile.statsByGame).length === 0 ? (

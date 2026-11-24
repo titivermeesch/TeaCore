@@ -11,20 +11,16 @@ import me.playbosswar.tea.core.api.kit.KitRegistry;
 import me.playbosswar.tea.core.api.message.MessageService;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
-/** Builds + opens an inventory-based kit selector for a player and game. */
 public final class KitSelectorGui {
 
-    private static final int SIZE = 27; // 3 rows
+    private static final int SIZE = 27;
     private static final int FIRST_SLOT = 10; // start of row 2, leaving edges empty
     private static final int LAST_SLOT = 16;
 
@@ -32,7 +28,6 @@ public final class KitSelectorGui {
     private final KitRegistry kitRegistry;
     private final MessageService messageService;
     private final EconomyService economyService;
-    private final NamespacedKey kitKey;
 
     public KitSelectorGui(Plugin plugin, KitRegistry kitRegistry, MessageService messageService,
             EconomyService economyService) {
@@ -40,11 +35,10 @@ public final class KitSelectorGui {
         this.kitRegistry = kitRegistry;
         this.messageService = messageService;
         this.economyService = economyService;
-        this.kitKey = new NamespacedKey(plugin, "kit_id");
     }
 
-    public NamespacedKey kitKey() {
-        return kitKey;
+    public static String kitIdOf(ItemStack item) {
+        return me.playbosswar.tea.core.impl.platform.TeaTags.get(item, "kit_id");
     }
 
     @SuppressWarnings("deprecation")
@@ -115,15 +109,14 @@ public final class KitSelectorGui {
             lore.add(costLine);
         }
         meta.setLore(lore);
-        meta.getPersistentDataContainer().set(kitKey, PersistentDataType.STRING, kit.kitId());
 
         if (currentSelection != null && currentSelection.kitId().equals(kit.kitId())) {
-            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+            meta.addEnchant(me.playbosswar.tea.core.impl.platform.Compat.glintEnchantment(), 1, true);
             meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
         }
 
         stack.setItemMeta(meta);
-        return stack;
+        return me.playbosswar.tea.core.impl.platform.TeaTags.set(stack, "kit_id", kit.kitId());
     }
 
     private String formatAmount(long amount) {

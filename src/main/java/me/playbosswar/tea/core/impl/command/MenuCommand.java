@@ -13,10 +13,8 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
 /**
- * {@code /menu <id> [player] [key=value ...]}: opens a menu, optionally with
- * values such as {@code game=fireball}. A menu file can set {@code permission:};
- * opening a menu for someone else needs {@code tea.menu.others} (handy for NPC
- * and sign plugins that run commands) and skips that permission.
+ * Opening a menu for someone else needs {@code tea.menu.others} and skips the menu's
+ * own {@code permission:} (for NPC and sign plugins that run commands).
  */
 public final class MenuCommand implements TabExecutor {
 

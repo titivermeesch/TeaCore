@@ -23,17 +23,11 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
- * Cached top-N tables for every stats column, refreshed asynchronously so
- * leaderboard placeholders never query the database on the main thread.
- *
- * <p>
- * Boards are keyed {@code <board>_<stat>}: {@code core_wins}, {@code core_kills},
- * ... for TeaCore's own stats, and {@code <gameId>_<slug of column label>} for
- * every registered {@link StatsSchema} (e.g. {@code fireball_games_won}).
+ * Board ids are {@code core_<stat>} and {@code <gameId>_<slug of column label>}.
+ * Refreshed asynchronously so placeholders never query the database on the main thread.
  */
 public final class LeaderboardCache {
 
-    /** How many places each board keeps. */
     public static final int SIZE = 10;
 
     private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z0-9_]+");
@@ -41,7 +35,6 @@ public final class LeaderboardCache {
             "wins", "wins", "losses", "losses", "games_played", "games_played",
             "kills", "kills", "deaths", "deaths", "assists", "assists");
 
-    /** One leaderboard place. */
     public record Entry(String name, String value) { }
 
     private final Plugin plugin;
@@ -58,7 +51,6 @@ public final class LeaderboardCache {
         this.logger = logger;
     }
 
-    /** Refreshes now and then every {@code leaderboards.refresh-seconds} (default 60). */
     public void start() {
         if (task != null) {
             return;
@@ -74,16 +66,18 @@ public final class LeaderboardCache {
         }
     }
 
-    /** The place at 1-based {@code position} on {@code board}, if it exists. */
+    /** {@code position} is 1-based. */
     public Entry entry(String board, int position) {
         List<Entry> list = boards.get(board);
+        if (list == null && StatAliases.board(board) != null) {
+            list = boards.get(StatAliases.board(board));
+        }
         if (list == null || position < 1 || position > list.size()) {
             return null;
         }
         return list.get(position - 1);
     }
 
-    /** Known board ids, e.g. {@code core_kills}, {@code fireball_games_won}. */
     public java.util.Set<String> boardIds() {
         return boards.keySet();
     }

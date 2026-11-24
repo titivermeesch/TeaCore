@@ -23,10 +23,11 @@ public final class GameRegistryImpl implements GameRegistry {
     @Override
     public void register(GameDefinition definition) {
         GameDefinition previous = games.put(definition.id(), definition);
-        if (previous != null) {
-            onUnregister.accept(previous);
+        // Registering again (after a settings change) only swaps the definition:
+        // the pool was preloaded and the game published the first time.
+        if (previous == null) {
+            onRegister.accept(definition);
         }
-        onRegister.accept(definition);
     }
 
     @Override

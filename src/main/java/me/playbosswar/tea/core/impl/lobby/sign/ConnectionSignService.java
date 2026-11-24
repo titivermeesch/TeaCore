@@ -13,9 +13,6 @@ import java.util.logging.Logger;
 import javax.sql.DataSource;
 import me.playbosswar.tea.core.api.game.GameId;
 
-/**
- * Holds bound connection signs in memory, backed by {@code tea_lobby_signs}.
- */
 public final class ConnectionSignService {
 
     private final DataSource dataSource;

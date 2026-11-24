@@ -24,6 +24,8 @@ import me.playbosswar.tea.core.api.map.MapDefinition;
 import me.playbosswar.tea.core.api.profile.PlayerProfile;
 import me.playbosswar.tea.core.api.stats.StatsProvider;
 import me.playbosswar.tea.core.impl.TeaCorePlugin;
+import me.playbosswar.tea.core.impl.dashboard.auth.DashboardAuth;
+import me.playbosswar.tea.core.impl.dashboard.auth.DashboardPermission;
 import me.playbosswar.tea.core.impl.dashboard.dto.ArenaDto;
 import me.playbosswar.tea.core.impl.dashboard.dto.GameSummaryDto;
 import me.playbosswar.tea.core.impl.dashboard.dto.MapDto;
@@ -36,26 +38,29 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Dashboard HTTP surface. Reads are sourced from the {@link CoordinationBackend}
- * so the dashboard sees the entire Tea fleet, not just arenas on the server
- * serving the request. Control actions publish {@link ControlCommand}s to the
- * target backend over the same channel; in standalone mode the in-memory
- * backend dispatches them synchronously.
+ * Reads come from the {@link CoordinationBackend} so the dashboard sees the whole
+ * fleet. Control actions publish {@link ControlCommand}s to the owning server; in
+ * standalone mode the in-memory backend dispatches them synchronously.
  */
 public final class DashboardApi {
 
     private final TeaCoreAPI core;
     private final TeaCorePlugin plugin;
+    private final DashboardAuth auth;
+    private final DashboardEventBroadcaster events;
 
-    public DashboardApi(TeaCoreAPI core, TeaCorePlugin plugin) {
+    public DashboardApi(TeaCoreAPI core, TeaCorePlugin plugin, DashboardAuth auth, DashboardEventBroadcaster events) {
         this.core = core;
         this.plugin = plugin;
+        this.auth = auth;
+        this.events = events;
     }
 
     public void register(Javalin app) {
         app.get("/api/games", this::listGames);
+        app.get("/api/leaderboard/{gameId}", this::leaderboard);
         app.get("/api/arenas", this::listArenas);
-        app.get("/api/arenas/{arenaId}", this::getArena);
+        // Arena detail, feeds and player actions: see DashboardLiveApi.
         app.get("/api/queues", this::listQueues);
         app.get("/api/queues/{gameId}", this::getQueue);
         app.get("/api/maps", this::listAllMaps);
@@ -64,26 +69,59 @@ public final class DashboardApi {
         app.get("/api/players/{uuid}", this::getPlayer);
         app.get("/api/stats/{gameId}/{uuid}", this::getStatsForPlayer);
 
-        // Control plane: every action publishes a ControlCommand to the arena's
-        // owning server via the coordination backend. Responses are 202 Accepted -
-        // the dashboard watches the event stream for confirmation.
-        app.post("/api/arenas", this::allocateArena);
-        app.post("/api/arenas/{arenaId}/start", this::forceStartArena);
-        app.post("/api/arenas/{arenaId}/release", this::releaseArena);
-        app.post("/api/arenas/{arenaId}/end-match", this::endArenaMatch);
-        app.delete("/api/queues/{gameId}/{playerUuid}", this::dequeuePlayer);
-        app.post("/api/maps/reload", this::reloadMaps);
-        app.delete("/api/maps/{gameId}/{mapId}", this::deleteMap);
+        // Control actions answer 202 Accepted; the dashboard watches the event stream for
+        // confirmation.
+        app.post("/api/arenas", auth.guard(DashboardPermission.ARENA_ALLOCATE, this::allocateArena));
+        app.post("/api/arenas/{arenaId}/start", auth.guard(DashboardPermission.ARENA_START, this::forceStartArena));
+        app.post("/api/arenas/{arenaId}/release", auth.guard(DashboardPermission.ARENA_RELEASE, this::releaseArena));
+        app.post("/api/arenas/{arenaId}/end-match", auth.guard(DashboardPermission.ARENA_END, this::endArenaMatch));
+        app.delete("/api/queues/{gameId}/{playerUuid}", auth.guard(DashboardPermission.QUEUE_REMOVE, this::dequeuePlayer));
+        app.post("/api/maps/reload", auth.guard(DashboardPermission.MAPS_RELOAD, this::reloadMaps));
+        app.delete("/api/maps/{gameId}/{mapId}", auth.guard(DashboardPermission.MAPS_DELETE, this::deleteMap));
+        app.get("/api/maps/{gameId}/{mapId}/versions", this::mapVersions);
+        app.post("/api/maps/{gameId}/{mapId}/restore", auth.guard(DashboardPermission.MAPS_RESTORE, this::restoreMap));
+        new DashboardLiveApi(plugin, auth, events, this).register(app);
+        new DashboardHistoryApi(plugin, auth).register(app);
+        if (plugin.settingsService() != null) {
+            new DashboardSettingsApi(plugin.settingsService(), auth).register(app);
+        }
     }
-
-    // ---- Games -----------------------------------------------------------
 
     private void listGames(Context ctx) {
         List<GameSummaryDto> games = new ArrayList<>();
-        for (GameDefinition def : core.games().all()) {
-            games.add(toDto(def));
+        for (GameId id : fleetGames()) {
+            games.add(core.games().get(id).map(this::toDto).orElseGet(() -> remoteDto(id)));
         }
         ctx.json(games);
+    }
+
+    /**
+     * Includes games other servers host: the dashboard usually runs on the lobby,
+     * which loads no game plugins.
+     */
+    private java.util.Set<GameId> fleetGames() {
+        java.util.Set<GameId> ids = new java.util.LinkedHashSet<>();
+        for (GameDefinition def : core.games().all()) {
+            ids.add(def.id());
+        }
+        ids.addAll(core.coordination().allHostedGames());
+        return ids;
+    }
+
+    private GameSummaryDto remoteDto(GameId id) {
+        org.bukkit.configuration.ConfigurationSection cfg = org.bukkit.Bukkit.getPluginManager()
+                .getPlugin("TeaCore").getConfig().getConfigurationSection("arena-pool.games." + id.value());
+        return new GameSummaryDto(
+                id.value(),
+                id.value(),
+                "REMOTE",
+                cfg == null ? 0 : cfg.getInt("min-available", 0),
+                cfg == null ? 0 : cfg.getInt("max-total", 0),
+                0, 0, 0, 0, 0, 0,
+                "REMOTE",
+                "random",
+                core.maps().forGame(id).size(),
+                java.util.List.copyOf(new java.util.TreeSet<>(core.coordination().hostsOf(id))));
     }
 
     private GameSummaryDto toDto(GameDefinition def) {
@@ -106,10 +144,9 @@ public final class DashboardApi {
                 def.lifecycle().maxMatchSeconds(),
                 def.endMode().name(),
                 selection,
-                mapCount);
+                mapCount,
+                java.util.List.of());
     }
-
-    // ---- Arenas (distributed) -------------------------------------------
 
     private void listArenas(Context ctx) {
         List<ArenaDto> out = new ArrayList<>();
@@ -120,21 +157,9 @@ public final class DashboardApi {
         ctx.json(out);
     }
 
-    private void getArena(Context ctx) {
-        ArenaId arenaId = parseArenaId(ctx);
-        if (arenaId == null) return;
-        for (ArenaSnapshot snapshot : core.coordination().allArenas()) {
-            if (snapshot.arenaId().equals(arenaId)) {
-                ctx.json(toDto(snapshot));
-                return;
-            }
-        }
-        ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "arena not found"));
-    }
-
-    private ArenaDto toDto(ArenaSnapshot snapshot) {
+    ArenaDto toDto(ArenaSnapshot snapshot) {
         String mapId = snapshot.mapId() == null || snapshot.mapId().isEmpty() ? null : snapshot.mapId();
-        // If the snapshot is from THIS server we can enrich from the local manager.
+        // Only snapshots from this server can be enriched from the local manager.
         if (snapshot.serverId().equals(core.coordination().serverId())) {
             Arena local = core.arenas().get(snapshot.arenaId()).orElse(null);
             if (local != null) {
@@ -153,6 +178,11 @@ public final class DashboardApi {
                         local.world().map(w -> w.getName()).orElse(null));
             }
         }
+        List<PlayerRefDto> players = new ArrayList<>();
+        List<PlayerRefDto> spectators = new ArrayList<>();
+        for (ArenaSnapshot.RosterEntry r : snapshot.roster()) {
+            (r.spectator() ? spectators : players).add(new PlayerRefDto(r.uuid().toString(), r.name()));
+        }
         return new ArenaDto(
                 snapshot.arenaId().value().toString(),
                 snapshot.gameId().value(),
@@ -160,11 +190,11 @@ public final class DashboardApi {
                 mapId,
                 snapshot.state().name(),
                 null,
-                -1,
+                snapshot.secondsRemaining(),
                 snapshot.minPlayers(),
                 snapshot.maxPlayers(),
-                List.of(),
-                List.of(),
+                players,
+                spectators,
                 null);
     }
 
@@ -183,14 +213,12 @@ public final class DashboardApi {
         return op.getName();
     }
 
-    // ---- Queues ----------------------------------------------------------
-
     private void listQueues(Context ctx) {
         Map<String, List<QueueEntryDto>> out = new LinkedHashMap<>();
         CoordinationBackend backend = core.coordination();
-        for (GameDefinition def : core.games().all()) {
-            List<QueueEntryDto> entries = queueEntriesFor(backend, def.id());
-            if (!entries.isEmpty()) out.put(def.id().value(), entries);
+        for (GameId id : fleetGames()) {
+            List<QueueEntryDto> entries = queueEntriesFor(backend, id);
+            if (!entries.isEmpty()) out.put(id.value(), entries);
         }
         ctx.json(out);
     }
@@ -216,8 +244,6 @@ public final class DashboardApi {
         }
         return out;
     }
-
-    // ---- Maps ------------------------------------------------------------
 
     private void listAllMaps(Context ctx) {
         List<MapDto> out = new ArrayList<>();
@@ -255,8 +281,6 @@ public final class DashboardApi {
                 descriptions);
     }
 
-    // ---- Players ---------------------------------------------------------
-
     private void getPlayer(Context ctx) {
         UUID uuid;
         try {
@@ -272,10 +296,8 @@ public final class DashboardApi {
             return;
         }
 
-        // Iterate persisted schemas (fleet-wide) and resolve to either the
-        // in-process provider or a generic DB-backed one. Lets the lobby's
-        // dashboard surface every game in the fleet, not only games whose
-        // plugin happens to be loaded on this server.
+        // Iterate persisted schemas so the lobby's dashboard shows every game in the fleet,
+        // not only games loaded here.
         Map<String, Map<String, String>> statsByGame = new LinkedHashMap<>();
         for (var schema : core.stats().allSchemas()) {
             Map<String, String> entries = core.stats().providerFor(schema).fetch(uuid);
@@ -303,8 +325,6 @@ public final class DashboardApi {
         ctx.json(out);
     }
 
-    // ---- Stats -----------------------------------------------------------
-
     private void getStatsForPlayer(Context ctx) {
         GameId gameId = new GameId(ctx.pathParam("gameId"));
         UUID uuid;
@@ -314,8 +334,8 @@ public final class DashboardApi {
             ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "invalid uuid"));
             return;
         }
-        // Prefer the in-process provider; fall back to a schema-driven generic
-        // provider so this works on a lobby with no game plugin loaded.
+        // Fall back to a schema-driven generic provider so this works on a lobby with no
+        // game plugin loaded.
         StatsProvider provider = core.stats().forGame(gameId).orElse(null);
         if (provider == null) {
             var schema = core.stats().allSchemas().stream()
@@ -330,8 +350,6 @@ public final class DashboardApi {
         }
         ctx.json(provider.fetch(uuid));
     }
-
-    // ---- Control plane (distributed) ------------------------------------
 
     private void allocateArena(Context ctx) {
         AllocateBody body;
@@ -354,9 +372,10 @@ public final class DashboardApi {
                             + "; specify serverId or ensure at least one arena backend is online."));
             return;
         }
-        core.coordination().publishControl(target, new ControlCommand(
+        core.coordination().publishControl(target, ControlCommand.of(
                 ControlCommand.Type.ALLOCATE_ARENA,
                 null, body.gameId, body.mapId, null));
+        auth.audit(ctx, "allocate " + body.gameId + (body.mapId == null ? "" : "/" + body.mapId) + " on " + target);
         ctx.status(HttpStatus.ACCEPTED).json(Map.of(
                 "ok", true, "serverId", target,
                 "note", "Arena allocation dispatched; watch the event stream for the new arena."));
@@ -385,9 +404,15 @@ public final class DashboardApi {
             body = new EndMatchBody();
         }
         if (body == null) body = new EndMatchBody();
-        core.coordination().publishControl(snapshot.serverId(), new ControlCommand(
-                ControlCommand.Type.END_MATCH,
-                arenaId.value().toString(), null, null, body.winnerUuid));
+        if (snapshot.state() != me.playbosswar.tea.core.api.arena.ArenaState.LIVE) {
+            ctx.status(HttpStatus.CONFLICT).json(Map.of("error", "no match running in this arena"));
+            return;
+        }
+        String team = body.winnerTeam;
+        String winner = body.winnerUuid;
+        Bukkit.getScheduler().runTask(plugin, () -> plugin.arenaAdmin().end(snapshot, team, winner));
+        auth.audit(ctx, "end match in arena " + arenaId.value() + " (winner "
+                + (team != null ? "team " + team : winner != null ? winner : "draw") + ")");
         ctx.status(HttpStatus.ACCEPTED).json(Map.of("ok", true, "serverId", snapshot.serverId()));
     }
 
@@ -399,8 +424,9 @@ public final class DashboardApi {
             ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "arena not found"));
             return;
         }
-        core.coordination().publishControl(snapshot.serverId(), new ControlCommand(
+        core.coordination().publishControl(snapshot.serverId(), ControlCommand.of(
                 type, arenaId.value().toString(), null, null, null));
+        auth.audit(ctx, type.name().toLowerCase(java.util.Locale.ROOT) + " arena " + arenaId.value());
         ctx.status(HttpStatus.ACCEPTED).json(Map.of("ok", true, "serverId", snapshot.serverId()));
     }
 
@@ -412,21 +438,22 @@ public final class DashboardApi {
             ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "invalid uuid"));
             return;
         }
-        // Queue lives in the coordination backend - safe to mutate from the
-        // Jetty worker thread.
+        // The queue lives in the coordination backend, so mutating it from the Jetty worker
+        // thread is safe.
         core.coordination().dequeue(uuid);
+        auth.audit(ctx, "removed " + uuid + " from the queue");
         ctx.json(Map.of("ok", true));
     }
 
     private void reloadMaps(Context ctx) {
-        // Fan out to every backend currently publishing arenas, plus ourselves.
         java.util.Set<String> targets = new java.util.LinkedHashSet<>();
         targets.add(core.coordination().serverId());
         for (ArenaSnapshot s : core.coordination().allArenas()) targets.add(s.serverId());
         for (String target : targets) {
-            core.coordination().publishControl(target, new ControlCommand(
+            core.coordination().publishControl(target, ControlCommand.of(
                     ControlCommand.Type.RELOAD_MAPS, null, null, null, null));
         }
+        auth.audit(ctx, "reload maps on " + targets);
         ctx.json(Map.of("ok", true, "targets", targets));
     }
 
@@ -437,24 +464,101 @@ public final class DashboardApi {
             ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "map not found"));
             return;
         }
-        // Same fan-out rationale as reloadMaps: map definitions are per-plugin
-        // in-memory state; every hosting server needs to drop the entry.
+        // Map definitions are per-plugin in-memory state, so every hosting server must
+        // drop the entry.
         java.util.Set<String> targets = new java.util.LinkedHashSet<>();
         targets.add(core.coordination().serverId());
-        for (ArenaSnapshot s : core.coordination().allArenas()) {
+        // With shared map storage one server changes the files and the others pull them.
+        for (ArenaSnapshot s : plugin.sharedFiles() != null ? List.<ArenaSnapshot>of() : core.coordination().allArenas()) {
             if (s.gameId().equals(gameId)) targets.add(s.serverId());
         }
         for (String target : targets) {
-            core.coordination().publishControl(target, new ControlCommand(
+            core.coordination().publishControl(target, ControlCommand.of(
                     ControlCommand.Type.DELETE_MAP, null, gameId.value(), mapId, null));
         }
+        auth.audit(ctx, "removed map " + gameId.value() + "/" + mapId);
         ctx.json(Map.of("ok", true, "targets", targets));
     }
 
-    // ---- helpers ---------------------------------------------------------
+    private void mapVersions(Context ctx) {
+        GameId gameId = new GameId(ctx.pathParam("gameId"));
+        String mapId = ctx.pathParam("mapId");
+        List<Map<String, Object>> out = new ArrayList<>();
+        try {
+            for (var v : plugin.mapEditingService().backups().list(gameId, mapId)) {
+                out.add(Map.of("number", v.number(), "when", v.when().toString(),
+                        "actor", v.actor(), "reason", v.reason()));
+            }
+        } catch (IllegalArgumentException e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "invalid map id"));
+            return;
+        }
+        ctx.json(out);
+    }
+
+    private void restoreMap(Context ctx) {
+        GameId gameId = new GameId(ctx.pathParam("gameId"));
+        String mapId = ctx.pathParam("mapId");
+        int number;
+        try {
+            number = ctx.bodyAsClass(RestoreRequest.class).version();
+        } catch (Exception e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "body must be {\"version\": n}"));
+            return;
+        }
+        if (plugin.mapEditingService().backups().get(gameId, mapId, number).isEmpty()) {
+            ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "no such version"));
+            return;
+        }
+        // Each hosting server keeps its own copy of the map, so restore on all
+        // of them (they hold the same versions when the maps folder is shared).
+        java.util.Set<String> targets = new java.util.LinkedHashSet<>();
+        targets.add(core.coordination().serverId());
+        // With shared map storage one server changes the files and the others pull them.
+        for (ArenaSnapshot s : plugin.sharedFiles() != null ? List.<ArenaSnapshot>of() : core.coordination().allArenas()) {
+            if (s.gameId().equals(gameId)) targets.add(s.serverId());
+        }
+        for (String target : targets) {
+            core.coordination().publishControl(target, new ControlCommand(ControlCommand.Type.RESTORE_MAP,
+                    null, gameId.value(), mapId, null, null, null, String.valueOf(number)));
+        }
+        auth.audit(ctx, "restored map " + gameId.value() + "/" + mapId + " to version #" + number);
+        ctx.json(Map.of("ok", true, "targets", targets));
+    }
+
+    record RestoreRequest(int version) { }
+
+    private void leaderboard(Context ctx) {
+        GameId gameId;
+        try {
+            gameId = GameId.of(ctx.pathParam("gameId"));
+        } catch (IllegalArgumentException e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "invalid game id"));
+            return;
+        }
+        int limit = 50;
+        try {
+            String raw = ctx.queryParam("limit");
+            if (raw != null) {
+                limit = Math.max(1, Math.min(200, Integer.parseInt(raw)));
+            }
+        } catch (NumberFormatException ignored) {
+            // keep 50
+        }
+        if (plugin.ratings() == null) {
+            ctx.json(List.of());
+            return;
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (var row : plugin.ratings().leaderboard(gameId, limit)) {
+            out.add(Map.of("rank", row.rank(), "uuid", row.uuid().toString(), "name", row.name(),
+                    "rating", row.rating(), "games", row.games(), "wins", row.wins(), "losses", row.losses()));
+        }
+        ctx.json(out);
+    }
 
     @Nullable
-    private ArenaId parseArenaId(Context ctx) {
+    ArenaId parseArenaId(Context ctx) {
         try {
             return new ArenaId(UUID.fromString(ctx.pathParam("arenaId")));
         } catch (IllegalArgumentException e) {
@@ -464,7 +568,7 @@ public final class DashboardApi {
     }
 
     @Nullable
-    private ArenaSnapshot findSnapshot(ArenaId arenaId) {
+    ArenaSnapshot findSnapshot(ArenaId arenaId) {
         for (ArenaSnapshot s : core.coordination().allArenas()) {
             if (s.arenaId().equals(arenaId)) return s;
         }
@@ -472,9 +576,8 @@ public final class DashboardApi {
     }
 
     /**
-     * Picks a backend to send an ALLOCATE_ARENA command to. Preference order:
-     * the local server (if it registered the game), then any server that has
-     * at least one arena for this game currently published.
+     * Prefers this server if it registered the game, then any server publishing an
+     * arena for it.
      */
     @Nullable
     private String pickAllocationTarget(String gameIdStr) {
@@ -489,16 +592,16 @@ public final class DashboardApi {
         return null;
     }
 
-    /** Jackson-deserialized body for {@code POST /api/arenas}. */
     public static final class AllocateBody {
         public String gameId;
         @Nullable public String mapId;
-        /** If omitted, the server chooses a target based on game registration. */
+        /** If omitted, the server picks a target from game registration. */
         @Nullable public String serverId;
     }
 
-    /** Jackson-deserialized body for {@code POST /api/arenas/{id}/end-match}. */
     public static final class EndMatchBody {
         @Nullable public String winnerUuid;
+        /** Takes precedence over {@code winnerUuid}. */
+        @Nullable public String winnerTeam;
     }
 }

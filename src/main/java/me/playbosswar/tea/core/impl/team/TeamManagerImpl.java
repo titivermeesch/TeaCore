@@ -23,6 +23,12 @@ public final class TeamManagerImpl implements TeamManager {
     private final GameRegistry gameRegistry;
     private final ConcurrentHashMap<ArenaId, LinkedHashMap<TeamId, TeamImpl>> arenaTeams = new ConcurrentHashMap<>();
 
+    private java.util.function.Function<UUID, java.util.Set<UUID>> partyMates = u -> java.util.Set.of();
+
+    public void setPartyMates(java.util.function.Function<UUID, java.util.Set<UUID>> partyMates) {
+        this.partyMates = partyMates;
+    }
+
     public TeamManagerImpl(ArenaManager arenaManager, GameRegistry gameRegistry) {
         this.arenaManager = arenaManager;
         this.gameRegistry = gameRegistry;
@@ -46,12 +52,26 @@ public final class TeamManagerImpl implements TeamManager {
         }
 
         if (teams.isEmpty()) {
+            int limit = teamLimits.getOrDefault(arenaId, Integer.MAX_VALUE);
             for (TeamDefinition td : declaredTeams(def)) {
+                if (teams.size() >= limit) {
+                    break;
+                }
                 teams.put(td.id(), new TeamImpl(td.id(), td.displayNameKey(), td.colorStyleSlot(), td.maxSize()));
             }
         }
 
-        TeamImpl target = pickSmallest(teams.values());
+        TeamImpl target = null;
+        for (UUID mate : partyMates.apply(playerUuid)) {
+            for (TeamImpl t : teams.values()) {
+                if (t.members().contains(mate) && t.size() < t.maxSize()) {
+                    target = t;
+                }
+            }
+        }
+        if (target == null) {
+            target = pickSmallest(teams.values());
+        }
         if (target == null || !target.add(playerUuid)) {
             throw new IllegalStateException("No team slot available in arena " + arenaId);
         }
@@ -90,6 +110,14 @@ public final class TeamManagerImpl implements TeamManager {
     @Override
     public void resetArena(ArenaId arenaId) {
         arenaTeams.remove(arenaId);
+        teamLimits.remove(arenaId);
+    }
+
+    private final ConcurrentHashMap<ArenaId, Integer> teamLimits = new ConcurrentHashMap<>();
+
+    @Override
+    public void limitTeams(ArenaId arenaId, int count) {
+        teamLimits.put(arenaId, Math.max(1, count));
     }
 
     @Override

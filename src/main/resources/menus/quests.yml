@@ -1,0 +1,40 @@
+# Quests, opened with /quests. Per quest: {quest_id} {name} {period} (daily or
+# weekly) {progress} {amount} {bar} {done} (true when finished) {reward}
+# {resets_in}.
+enabled: true
+title: "<primary>Quests"
+rows: 3
+pattern:
+  - "DDDD#WWWW"
+  - "#########"
+  - "########X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'D':
+    source: quests-daily
+    item:
+      material: "{icon}"
+      name: "<primary>{name}"
+      glow: "{done}"
+      lore:
+        - "<secondary>Daily quest"
+        - "{bar} <highlight>{progress}/{amount}"
+        - "<secondary>Reward: <highlight>{reward}"
+        - "<muted>New quests in {resets_in}"
+      action: none
+    empty: { material: BARRIER, name: "<muted>No daily quests" }
+  'W':
+    source: quests-weekly
+    item:
+      material: "{icon}"
+      name: "<accent>{name}"
+      glow: "{done}"
+      lore:
+        - "<secondary>Weekly quest"
+        - "{bar} <highlight>{progress}/{amount}"
+        - "<secondary>Reward: <highlight>{reward}"
+        - "<muted>New quests in {resets_in}"
+      action: none
+    empty: { material: BARRIER, name: "<muted>No weekly quests" }

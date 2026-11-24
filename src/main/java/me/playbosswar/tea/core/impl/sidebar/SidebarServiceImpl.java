@@ -25,10 +25,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Default {@link SidebarService}: renders YAML layouts for games (priority 100)
- * and the lobby (priority 50) through the shared {@link ScoreboardManager}.
- */
 public final class SidebarServiceImpl implements SidebarService {
 
     static final int GAME_PRIORITY = 100;
@@ -39,14 +35,47 @@ public final class SidebarServiceImpl implements SidebarService {
     private final FeatureService features;
     private final ArenaValues values;
     private final Supplier<ConfigurationSection> lobbyLayout;
+    private Supplier<ConfigurationSection> spectatorLayout = () -> null;
+    private java.util.function.Predicate<Player> spectatorView = p -> false;
+
+    /** Used when sidebar.yml has no {@code spectator} section. */
+    private static final List<String> DEFAULT_SPECTATOR_LINES = List.of(
+            "<secondary>Time:</secondary> <yellow><time></yellow>",
+            "<muted>You are spectating</muted>",
+            "",
+            "@teams: <team-name><gray>:</gray> <white><team-score></white>",
+            "",
+            "<secondary>Watching:</secondary> <highlight><watching></highlight>",
+            "<secondary>K/D/A:</secondary> <white><watching-kills>/<watching-deaths>/<watching-assists></white>");
+
+    public void setSpectatorSidebar(Supplier<ConfigurationSection> layout, java.util.function.Predicate<Player> who) {
+        this.spectatorLayout = layout;
+        this.spectatorView = who;
+    }
+
+    private List<String> linesFor(Player viewer, Arena arena, GameLayout game) {
+        String phase = phaseOf(arena.state());
+        if (("live".equals(phase) || "starting".equals(phase))
+                && arena.spectators().contains(viewer.getUniqueId()) && spectatorView.test(viewer)) {
+            List<String> own = game.layout().phases().get("spectating");
+            if (own != null) {
+                return own;
+            }
+            ConfigurationSection section = spectatorLayout.get();
+            if (section == null) {
+                return DEFAULT_SPECTATOR_LINES;
+            }
+            if (section.getBoolean("enabled", true)) {
+                return List.copyOf(section.getStringList("lines"));
+            }
+        }
+        return game.layout().lines(phase);
+    }
     private final Supplier<Boolean> lobbyEnabled;
     private final Map<GameId, GameLayout> games = new ConcurrentHashMap<>();
     private final Set<UUID> hidden = ConcurrentHashMap.newKeySet();
 
-    /**
-     * @param lobbyLayout  the {@code lobby} section of TeaCore's sidebar.yml (may be null).
-     * @param lobbyEnabled whether lobby features are on for this server.
-     */
+    /** @param lobbyLayout the {@code lobby} section of sidebar.yml, may be null */
     public SidebarServiceImpl(TeaCoreAPI core, ScoreboardManager manager, FeatureService features,
                               ArenaValues values, Supplier<ConfigurationSection> lobbyLayout,
                               Supplier<Boolean> lobbyEnabled) {
@@ -95,14 +124,10 @@ public final class SidebarServiceImpl implements SidebarService {
         manager.refresh(player);
     }
 
-    /** Whether the player has sidebars on (the /board toggle). */
     public boolean allowed(Player player) {
         return !hidden.contains(player.getUniqueId());
     }
 
-    // --- Layouts ---
-
-    /** A parsed layout: title plus line templates per phase. */
     record Layout(boolean enabled, String title, Map<String, List<String>> phases) {
 
         static Layout parse(ConfigurationSection section) {
@@ -118,7 +143,6 @@ public final class SidebarServiceImpl implements SidebarService {
             return new Layout(section.getBoolean("enabled", true), section.getString("title", ""), phases);
         }
 
-        /** Lines for a phase, with documented fallbacks. */
         List<String> lines(String phase) {
             List<String> lines = phases.get(phase);
             if (lines == null && "starting".equals(phase)) {
@@ -142,8 +166,6 @@ public final class SidebarServiceImpl implements SidebarService {
             default -> "ended";
         };
     }
-
-    // --- Rendering ---
 
     private SidebarProvider.Sidebar render(Player viewer, Layout layout, List<String> templates,
                                            Map<String, String> base, Arena arena, SidebarData data) {
@@ -184,6 +206,22 @@ public final class SidebarServiceImpl implements SidebarService {
         return ms.renderInline(PapiBridge.apply(viewer, template), ph);
     }
 
+    /** Ignores the /board toggle. Used to mirror sidebars to the dashboard. */
+    public Optional<SidebarProvider.Sidebar> gameSidebar(Player viewer) {
+        Arena arena = core.arenas().arenaOf(viewer.getUniqueId()).orElse(null);
+        if (arena == null || !features.enabled("sidebar") || !features.enabled(arena.gameId(), "sidebar")) {
+            return Optional.empty();
+        }
+        GameLayout game = games.get(arena.gameId());
+        if (game == null || !game.layout().enabled()) {
+            return Optional.empty();
+        }
+        Map<String, String> base = new HashMap<>(values.forViewer(viewer, arena));
+        base.putAll(game.data().placeholders(viewer, arena));
+        List<String> lines = linesFor(viewer, arena, game);
+        return Optional.of(render(viewer, game.layout(), lines, base, arena, game.data()));
+    }
+
     private final class GameProvider implements SidebarProvider {
         @Override
         public int priority() {
@@ -205,7 +243,7 @@ public final class SidebarServiceImpl implements SidebarService {
             }
             Map<String, String> base = new HashMap<>(values.forViewer(player, arena));
             base.putAll(game.data().placeholders(player, arena));
-            List<String> lines = game.layout().lines(phaseOf(arena.state()));
+            List<String> lines = linesFor(player, arena, game);
             return Optional.of(render(player, game.layout(), lines, base, arena, game.data()));
         }
     }

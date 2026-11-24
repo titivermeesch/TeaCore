@@ -1,0 +1,73 @@
+# Map editor checklist. Opened with the checklist tool while editing a map
+# (/tea map create|edit). Needs features.map-editor-tools for the tool, but the
+# menu also opens with /menu map-editor while a draft is open.
+#
+# Point rows (source map-editor-points), one per point type of the map's game:
+#   {label} {count} {status} (set|missing|optional) {status_label} {required}
+#   {selected} {type_index} {type_id}
+# Info rows (source map-editor-info): region, players, name, ready:
+#   {label} {detail} {hint} {status} {status_label} {info_id}
+#   and the click actions {left_action} {right_action} {shift_left_action}
+#   {shift_right_action}.
+enabled: true
+permission: tea.map.admin
+title: "<primary>Map setup"
+rows: 5
+refresh-ticks: 20
+pattern:
+  - "IIII#M#DS"
+  - "#########"
+  - "PPPPPPPPP"
+  - "PPPPPPPPP"
+  - "###<X>###"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+  'M':
+    material: ENDER_EYE
+    name: "<secondary>Show or hide markers"
+    lore:
+      - "<muted>Particle columns and labels on every point"
+    actions: ["editor-markers", "sound:UI_BUTTON_CLICK"]
+  'D':
+    material: TNT
+    name: "<error>Discard changes"
+    lore:
+      - "<muted>Leaves the editor without saving"
+    actions: ["confirm:Discard this draft?|editor-discard"]
+  'S':
+    material: EMERALD
+    name: "<success>Save map"
+    lore:
+      - "<muted>Same as /tea map save"
+    actions: ["editor-save"]
+lists:
+  'I':
+    source: map-editor-info
+    item:
+      name: "<primary>{label}"
+      lore:
+        - "<secondary>{detail}"
+        - "{status_label}"
+        - ""
+        - "<muted>{hint}"
+      left-actions: ["{left_action}"]
+      right-actions: ["{right_action}"]
+      shift-left-actions: ["{shift_left_action}"]
+      shift-right-actions: ["{shift_right_action}"]
+  'P':
+    source: map-editor-points
+    item:
+      name: "<primary>{label} <muted>({count})"
+      glow: "{selected}"
+      lore:
+        - "{status_label}"
+        - ""
+        - "<muted>Left-click: select on the point tool"
+        - "<muted>Right-click: teleport to the first point"
+        - "<muted>Shift-click: remove all"
+      left-actions: ["editor-select:{type_index}", "sound:UI_BUTTON_CLICK"]
+      right-actions: ["editor-tp:{type_index}"]
+      shift-actions: ["confirm:Remove all {label} points?|editor-clear:{type_index}"]

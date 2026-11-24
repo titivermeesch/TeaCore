@@ -1,29 +1,23 @@
 package me.playbosswar.tea.core.api.arena;
 
 /**
- * Lifecycle states an {@link Arena} moves through from allocation to release.
- *
- * <p>
- * Transitions are driven by the arena lifecycle ticker and emit an
- * {@link ArenaStateChangeEvent} on each change.
+ * The states an {@link Arena} moves through, in order. Each change fires an
+ * {@link ArenaStateChangeEvent}.
  */
 public enum ArenaState {
     /** World being created and map pasted. */
     ALLOCATING,
-    /** Map ready, accepting players, waiting for min-players. */
+    /** Accepting players until min-players is reached. */
     WAITING,
-    /** Enough players present; counting down to start. */
+    /** Enough players; counting down to start. */
     COUNTDOWN,
-    /**
-     * Freeze frame between countdown end and gameplay start (teleport, apply kits).
-     */
+    /** Short freeze after the countdown while players are teleported and kits applied. */
     STARTING,
-    /** Gameplay in progress. */
     LIVE,
     /** Winner determined; brief freeze before cleanup. */
     ENDING,
     /** World being rolled back or torn down. */
     RESETTING,
-    /** Arena slot freed; can be reallocated or disposed. */
+    /** Final state; the arena is not reused. */
     RELEASED
 }

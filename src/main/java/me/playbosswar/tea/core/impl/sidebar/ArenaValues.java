@@ -22,29 +22,32 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 
-/**
- * The built-in values every sidebar line and {@code %tea_...%} placeholder can
- * use for a player in an arena, computed in one place so both always agree.
- * Also remembers each arena's last winner for the {@code ended} phase.
- */
 public final class ArenaValues implements Listener {
 
     private final TeaCoreAPI core;
     private final java.util.function.Supplier<String> defaultLocale;
     private final Map<ArenaId, String> winners = new ConcurrentHashMap<>();
 
-    /**
-     * @param defaultLocale the server's default locale (i18n.default-locale), used
-     *                      for values shared by every viewer such as the winner.
-     */
     public ArenaValues(TeaCoreAPI core, java.util.function.Supplier<String> defaultLocale) {
         this.core = core;
         this.defaultLocale = defaultLocale;
     }
 
-    /** Values for {@code viewer} in {@code arena}; keys are tag names without brackets. */
+    private java.util.function.Function<java.util.UUID, Optional<java.util.UUID>> watching = u -> Optional.empty();
+
+    public void setWatching(java.util.function.Function<java.util.UUID, Optional<java.util.UUID>> watching) {
+        this.watching = watching;
+    }
+/** Keys are tag names without brackets. */
+
     public Map<String, String> forViewer(Player viewer, Arena arena) {
         Map<String, String> v = new HashMap<>();
+        Optional<java.util.UUID> watched = watching.apply(viewer.getUniqueId());
+        MatchStats watchedStats = watched.map(w -> core.combat().matchStats(arena.id(), w)).orElse(null);
+        v.put("watching", watched.map(org.bukkit.Bukkit::getPlayer).map(Player::getName).orElse("-"));
+        v.put("watching-kills", watchedStats == null ? "-" : String.valueOf(watchedStats.kills()));
+        v.put("watching-deaths", watchedStats == null ? "-" : String.valueOf(watchedStats.deaths()));
+        v.put("watching-assists", watchedStats == null ? "-" : String.valueOf(watchedStats.assists()));
         String locale = core.messageService().resolveLocale(viewer);
         v.put("player", viewer.getName());
         v.put("game", arena.gameId().value());
@@ -75,7 +78,6 @@ public final class ArenaValues implements Listener {
         return v;
     }
 
-    /** Built-in columns of a {@code @players:} row. */
     public Map<String, String> playerRow(Player viewer, Arena arena, Player player) {
         String locale = core.messageService().resolveLocale(viewer);
         MatchStats stats = core.combat().matchStats(arena.id(), player.getUniqueId());
@@ -91,7 +93,7 @@ public final class ArenaValues implements Listener {
         return row;
     }
 
-    /** Built-in columns of a {@code @teams:} row; score defaults to the members' match kills. */
+    /** Score defaults to the members' match kills. */
     public Map<String, String> teamRow(Player viewer, Arena arena, Team team) {
         String locale = core.messageService().resolveLocale(viewer);
         int kills = 0;
@@ -121,14 +123,12 @@ public final class ArenaValues implements Listener {
         return gameName(locale, arena.gameId());
     }
 
-    /** A game's plain display name, honouring {@code game-display}. */
     public String gameName(String locale, me.playbosswar.tea.core.api.game.GameId game) {
         return display == null ? game.value() : display.plainName(locale, game);
     }
 
     private me.playbosswar.tea.core.impl.menu.GameDisplay display;
 
-    /** Lets {@code <game-name>} honour {@code game-display} overrides. */
     public void setGameDisplay(me.playbosswar.tea.core.impl.menu.GameDisplay display) {
         this.display = display;
     }
@@ -153,7 +153,10 @@ public final class ArenaValues implements Listener {
                         .filter(t -> t.id().equals(teamId)).findFirst())
                 .map(t -> teamName(defaultLocale.get(), t))
                 .orElseGet(() -> event.winner().map(Bukkit::getOfflinePlayer)
-                        .map(OfflinePlayer::getName).orElse("-"));
+                        .map(OfflinePlayer::getName)
+                        // A draw: "Nobody wins!" rather than "- wins!".
+                        .orElseGet(() -> core.messageService().renderLegacyNoPrefix(
+                                defaultLocale.get(), "core.sidebar.draw-winner", Map.of())));
         winners.put(arena.id(), name);
     }
 

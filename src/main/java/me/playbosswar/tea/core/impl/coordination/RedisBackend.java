@@ -32,7 +32,7 @@ import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.impl.config.CoreConfig;
 
 /**
- * Redis-backed coordination via Lettuce. Layout:
+ * Layout:
  *
  * <pre>{@code
  *   tea:arena:<arenaId>                hash, TTL 10s, fields: server, game, map, state, players, min, max, updatedAt
@@ -41,8 +41,7 @@ import me.playbosswar.tea.core.impl.config.CoreConfig;
  *   tea:matchmaker:leader               SET-NX-EX key; TTL 10s, refreshed every 3s
  * }</pre>
  *
- * Arenas whose hash has expired are treated as offline. Queue entries are
- * persistent
+ * Arenas whose hash has expired are treated as offline. Queue entries persist
  * until explicitly removed.
  */
 public final class RedisBackend implements CoordinationBackend {
@@ -110,6 +109,18 @@ public final class RedisBackend implements CoordinationBackend {
         h.put("min", String.valueOf(s.minPlayers()));
         h.put("max", String.valueOf(s.maxPlayers()));
         h.put("updatedAt", String.valueOf(s.updatedAt().toEpochMilli()));
+        h.put("remaining", String.valueOf(s.secondsRemaining()));
+        h.put("roster", encodeRoster(s.roster()));
+        h.put("ranked", s.ranked() == null ? "" : String.valueOf(s.ranked()));
+        h.put("avgRating", String.valueOf(s.averageRating()));
+        h.put("ratingRange", String.valueOf(s.ratingRange()));
+        if (s.sidebar() != null) {
+            h.put("sb_viewer", s.sidebar().viewer());
+            h.put("sb_title", s.sidebar().title());
+            h.put("sb_lines", String.join("\n", s.sidebar().lines()));
+        } else {
+            h.put("sb_viewer", "");
+        }
         try {
             redis.hset(key, h);
             redis.expire(key, ARENA_TTL.toSeconds());
@@ -117,6 +128,53 @@ public final class RedisBackend implements CoordinationBackend {
         } catch (Exception e) {
             logger.log(Level.WARNING, "Failed to publish arena " + s.arenaId(), e);
         }
+    }
+
+    /** {@code uuid;name;team;s|...}; names and team ids never contain ';' or '|'. */
+    static String encodeRoster(List<ArenaSnapshot.RosterEntry> roster) {
+        StringBuilder sb = new StringBuilder();
+        for (ArenaSnapshot.RosterEntry e : roster) {
+            if (sb.length() > 0) {
+                sb.append('|');
+            }
+            sb.append(e.uuid()).append(';').append(e.name()).append(';')
+                    .append(e.team() == null ? "" : e.team()).append(';').append(e.spectator() ? 's' : 'p')
+                    .append(';').append(e.kills()).append(';').append(e.deaths()).append(';').append(e.assists());
+        }
+        return sb.toString();
+    }
+
+    static List<ArenaSnapshot.RosterEntry> decodeRoster(String raw) {
+        List<ArenaSnapshot.RosterEntry> out = new ArrayList<>();
+        if (raw == null || raw.isEmpty()) {
+            return out;
+        }
+        for (String part : raw.split("\\|")) {
+            String[] f = part.split(";", -1);
+            if (f.length < 4) {
+                continue;
+            }
+            try {
+                int kills = f.length > 6 ? Integer.parseInt(f[4]) : 0;
+                int deaths = f.length > 6 ? Integer.parseInt(f[5]) : 0;
+                int assists = f.length > 6 ? Integer.parseInt(f[6]) : 0;
+                out.add(new ArenaSnapshot.RosterEntry(UUID.fromString(f[0]), f[1],
+                        f[2].isEmpty() ? null : f[2], "s".equals(f[3]), kills, deaths, assists));
+            } catch (IllegalArgumentException ignored) {
+                // skip a malformed entry
+            }
+        }
+        return out;
+    }
+
+    static ArenaSnapshot.SidebarView decodeSidebar(Map<String, String> h) {
+        String viewer = h.getOrDefault("sb_viewer", "");
+        if (viewer.isEmpty()) {
+            return null;
+        }
+        String lines = h.getOrDefault("sb_lines", "");
+        return new ArenaSnapshot.SidebarView(viewer, h.getOrDefault("sb_title", ""),
+                lines.isEmpty() ? List.of() : List.of(lines.split("\n", -1)));
     }
 
     @Override
@@ -150,7 +208,13 @@ public final class RedisBackend implements CoordinationBackend {
                             Integer.parseInt(h.getOrDefault("players", "0")),
                             Integer.parseInt(h.getOrDefault("min", "2")),
                             Integer.parseInt(h.getOrDefault("max", "16")),
-                            Instant.ofEpochMilli(Long.parseLong(h.getOrDefault("updatedAt", "0")))));
+                            Instant.ofEpochMilli(Long.parseLong(h.getOrDefault("updatedAt", "0"))),
+                            Integer.parseInt(h.getOrDefault("remaining", "-1")),
+                            decodeRoster(h.getOrDefault("roster", "")),
+                            decodeSidebar(h),
+                            h.getOrDefault("ranked", "").isEmpty() ? null : Boolean.valueOf(h.get("ranked")),
+                            Integer.parseInt(h.getOrDefault("avgRating", "0")),
+                            Integer.parseInt(h.getOrDefault("ratingRange", "0"))));
                 } catch (Exception e) {
                     logger.log(Level.WARNING, "Malformed arena entry " + idStr, e);
                 }
@@ -166,7 +230,6 @@ public final class RedisBackend implements CoordinationBackend {
         String key = "tea:queue:" + entry.gameId().value();
         String member = encodeEntry(entry);
         try {
-            // Remove any previous entry for this player in this queue
             for (String existing : redis.zrange(key, 0, -1)) {
                 if (existing.startsWith(entry.playerUuid() + "|")) {
                     redis.zrem(key, existing);
@@ -353,7 +416,6 @@ public final class RedisBackend implements CoordinationBackend {
                     SetArgs.Builder.nx().ex(LEADER_TTL.toSeconds()));
             if ("OK".equals(ok))
                 return true;
-            // Already held - extend it only if we're the holder
             String current = redis.get(LEADER_KEY);
             if (serverId.equals(current)) {
                 redis.expire(LEADER_KEY, LEADER_TTL.toSeconds());
@@ -393,23 +455,27 @@ public final class RedisBackend implements CoordinationBackend {
         }
     }
 
-    // --- encode/decode ---
-
     private static String encodeEntry(QueueEntry entry) {
         return entry.playerUuid() + "|" + entry.playerName() + "|"
-                + String.join(",", entry.mapIds()) + "|" + entry.queuedAt().toEpochMilli();
+                + String.join(",", entry.mapIds()) + "|" + entry.queuedAt().toEpochMilli()
+                + "|" + entry.ranked() + "|" + entry.rating()
+                + "|" + (entry.partyId() == null ? "" : entry.partyId()) + "|" + entry.partySize();
     }
 
     private static QueueEntry decodeEntry(GameId gameId, String member) {
         try {
-            String[] parts = member.split("\\|", 4);
+            String[] parts = member.split("\\|", 8);
             if (parts.length < 4)
                 return null;
             UUID uuid = UUID.fromString(parts[0]);
             String name = parts[1];
             List<String> mapIds = parts[2].isEmpty() ? List.of() : List.of(parts[2].split(","));
             Instant queuedAt = Instant.ofEpochMilli(Long.parseLong(parts[3]));
-            return new QueueEntry(uuid, name, gameId, mapIds, queuedAt);
+            boolean ranked = parts.length > 4 && Boolean.parseBoolean(parts[4]);
+            int rating = parts.length > 5 ? Integer.parseInt(parts[5]) : 0;
+            String partyId = parts.length > 6 && !parts[6].isEmpty() ? parts[6] : null;
+            int partySize = parts.length > 7 ? Integer.parseInt(parts[7]) : 1;
+            return new QueueEntry(uuid, name, gameId, mapIds, queuedAt, ranked, rating, partyId, partySize);
         } catch (Exception e) {
             return null;
         }

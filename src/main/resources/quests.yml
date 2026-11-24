@@ -1,0 +1,66 @@
+# Daily and weekly quests (features.quests). Each player gets "daily-count"
+# quests a day and "weekly-count" a week, picked from the lists below (the
+# same picks on every server). Progress counts on every server of the network
+# that shares the database. /quests shows them.
+#
+# goal: wins | games (matches finished) | kills | assists
+# game: a game id, or "any"
+# reward.coins goes through the economy plugin (Vault) when there is one;
+# reward.commands run from the console with {player} replaced. Both optional.
+settings:
+  daily-count: 3
+  weekly-count: 2
+  # When days and weeks start (server time zone). Weeks start on Monday.
+  reset-hour: 0
+
+daily:
+  win-2:
+    name: "Win 2 matches"
+    goal: wins
+    amount: 2
+    game: any
+    reward: { coins: 100 }
+  play-3:
+    name: "Finish 3 matches"
+    goal: games
+    amount: 3
+    game: any
+    reward: { coins: 50 }
+  kills-10:
+    name: "Get 10 kills"
+    goal: kills
+    amount: 10
+    game: any
+    reward: { coins: 75 }
+  assists-5:
+    name: "Get 5 assists"
+    goal: assists
+    amount: 5
+    game: any
+    reward: { coins: 50 }
+  fireball-kills:
+    name: "Get 8 kills in Fireball"
+    goal: kills
+    amount: 8
+    game: fireball
+    reward: { coins: 80 }
+
+weekly:
+  win-15:
+    name: "Win 15 matches"
+    goal: wins
+    amount: 15
+    game: any
+    reward: { coins: 600 }
+  kills-100:
+    name: "Get 100 kills"
+    goal: kills
+    amount: 100
+    game: any
+    reward: { coins: 500 }
+  play-30:
+    name: "Finish 30 matches"
+    goal: games
+    amount: 30
+    game: any
+    reward: { coins: 400, commands: [] }

@@ -3,38 +3,18 @@ package me.playbosswar.tea.core.api.theme;
 import java.util.Set;
 
 /**
- * Access to the active theme's named style slots and prefix.
- *
- * <p>
- * Values are raw MiniMessage tag strings such as {@code "<#5fd1ff>"} or
- * {@code "<bold><white>"}. Consumers typically do not call this interface
- * directly;
- * instead, translation entries reference slots by name and the
- * {@link me.playbosswar.tea.core.api.message.MessageService} resolves them at
- * render time.
+ * The active theme's style slots. Values are raw MiniMessage tags such as
+ * {@code "<#5fd1ff>"}. Translations usually reference slots by name and let
+ * {@link me.playbosswar.tea.core.api.message.MessageService} resolve them.
  */
 public interface Theme {
 
-    /**
-     * Returns the MiniMessage opening-tag value for a slot.
-     *
-     * @param slotName name of the slot; must not be {@code null}.
-     * @return the tag string, or an empty string if no slot is defined under that
-     *         name.
-     */
+    /** The slot's opening tag, or an empty string for an unknown slot. */
     String tag(String slotName);
 
-    /**
-     * Returns the rendered prefix applied before themed messages.
-     *
-     * @return the prefix, never {@code null}; empty when the theme defines none.
-     */
+    /** Empty when the theme defines no prefix. */
     String prefix();
 
-    /**
-     * Returns all defined slot names.
-     *
-     * @return a snapshot set of slot names, never {@code null}.
-     */
+    /** Returns a snapshot. */
     Set<String> slotNames();
 }

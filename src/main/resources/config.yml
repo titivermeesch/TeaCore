@@ -40,6 +40,15 @@ arena-pool:
   #                external orchestration (HPA, queue-driven scaler) creates pods.
   mode: standalone
 
+  # Released arena worlds kept loaded for the next arena on the same map, so a
+  # new arena skips creating a world (the most expensive step). Blocks outside
+  # the map's region (e.g. placed above it) are not reset. 0 turns reuse off.
+  spare-worlds: 2
+  # Extra arenas opened for a rush close again once they have waited empty this
+  # long and there are more empty arenas than min-available (and nobody is
+  # queued). 0 keeps them open.
+  scale-down-idle-seconds: 60
+
   # Per-game overrides. If a game id isn't listed here, the game's own default
   # (from its GameDefinition) applies. Keys default to -1 meaning "use the
   # game's default".
@@ -48,6 +57,20 @@ arena-pool:
     #   min-available: 1
     #   max-total: 4
     #   preload-on-startup: 0
+
+
+# What this server hosts. Game jars still have to be installed; the maps come
+# from the database (maps.storage), so a new arena server needs nothing else.
+hosting:
+  # Game ids, or "any" for every installed game. A server running one match at
+  # a time (arena-pool.mode: external) with several games opens the game the
+  # most players are queued for, and switches when its arena sits empty.
+  games: [any]
+  # How arenas pick their map: default (the game decides), random, vote
+  # (random, then players vote while waiting) or a map id.
+  map: default
+  # Per game, e.g. fireball: coliseum
+  maps: {}
 
 # Optional features. Everything is on by default; set a key to false to turn
 # that feature off server-wide. Under games.<id> you can override any key for
@@ -68,7 +91,142 @@ features:
   # Record finished matches (game, map, winner, each player's K/D/A) for the
   # match history menu.
   match-history: true
+  # Map editor tool hotbar (region wand, point tool, checklist, save) and the
+  # particle markers shown while editing a map with /tea map create|edit.
+  map-editor-tools: true
+  # Arena spectators fly around unseen with a teleporter (watch any player,
+  # also in first person), a play-again item and a leave item, and get the
+  # spectator sidebar (sidebar.yml). Off: they get the game's spectator mode.
+  spectator-tools: true
+  # Players waiting for a match vote between a few maps (map-voting below).
+  # Needs at least two maps for the game. Can be set per game.
+  map-voting: true
+  # Players waiting for a match (before it starts) take no damage and don't
+  # get hungry. Can be set per game.
+  waiting-protection: true
+  # Players waiting for a match get a hotbar item that opens the game's kit
+  # picker (kit-item below). Only for games with kits. Can be set per game.
+  kit-item: true
+  # Players waiting for a match get a hotbar item that leaves the arena
+  # (leave-item below). Can be set per game.
+  leave-item: true
+  # Ranked play: /play <game> ranked, Elo ratings, /leaderboard. Can be set per game.
+  ranked: true
+  # Daily and weekly quests (quests.yml, /quests).
+  quests: true
   games: {}
+
+# Finished matches (features.match-history) older than this many days are
+# deleted once a day. 0 keeps them forever. Needs a restart to change.
+match-history:
+  keep-days: 90
+
+# Parties, read from Parties (AlessioDP) or Party and Friends when installed.
+# A party leader's /play takes every member on the same server who isn't in a
+# match, into one arena and onto one team when that team has room.
+parties:
+  enabled: true
+  # true: members can't /play on their own while in a party.
+  leader-only: true
+
+# Ranked play (features.ranked). Everyone starts at start-rating; a match moves
+# ratings by up to k-factor points. A ranked arena takes players within "range"
+# of its average rating, widening by widen-per-10s every 10 seconds it waits,
+# up to max-range.
+ranked:
+  start-rating: 1000
+  k-factor: 32
+  range: 150
+  widen-per-10s: 50
+  max-range: 600
+
+# Map voting (features.map-voting): how many maps each vote offers (the loaded
+# map plus random others) and the hotbar slot (0-8) of the vote item.
+map-voting:
+  options: 3
+  hotbar-slot: 7
+
+# Kit item (features.kit-item): the item and its hotbar slot (0-8).
+kit-item:
+  material: NETHER_STAR
+  hotbar-slot: 0
+
+# Shared waiting areas (optional). Without one, players wait inside the map at
+# its waiting spawn. With one, players who join wait here - any world, e.g. a
+# separate lobby world - and move into the arena when the countdown ends.
+# Set them in game with /tea waiting set [game] (no game = the default for all).
+# waiting-area:
+#   default: { world: waiting, x: 0.5, y: 65, z: 0.5, yaw: 0, pitch: 0 }
+#   fireball: { world: waiting, x: 100.5, y: 65, z: 0.5, yaw: 90, pitch: 0 }
+
+# CloudNet v3 (optional). Used only when the server runs as a CloudNet service
+# with the Bridge module; otherwise ignored. See the CloudNet page in the docs.
+# cloudnet:
+#   enabled: true
+#   lobby-task: Lobby               # players sent "to the lobby" go to its emptiest service
+#   publish-state: true             # LOBBY / INGAME, map and players for CloudNet signs and NPCs
+#   games:
+#     fireball:
+#       task: Fireball              # the task whose services host this game
+#       min-services: 1
+#       max-services: 4
+#       arenas-per-service: 4       # 1 for one match per service
+#       idle-seconds: 120           # stop an empty service after this long
+#   template-sync:
+#     enabled: false                # upload maps and waiting rooms when they're saved
+#     templates: ["Fireball/default"]
+
+# Leave item (features.leave-item): the item and its hotbar slot (0-8).
+leave-item:
+  material: RED_BED
+  hotbar-slot: 8
+
+# NPCs that open a menu when right-clicked, standing in a game's arenas (e.g.
+# Fireball's shopkeeper). Games register their own; here you can restyle them
+# or add new ones. Place them on a map with /tea map <npc id> (one NPC per
+# point). Keys per NPC, all optional:
+#   menu     menu id to open (menus/*.yml, or a game's menu like fireball:shop)
+#   entity   living entity type, e.g. VILLAGER, WANDERING_TRADER, IRON_GOLEM
+#   name     MiniMessage name shown above it (default: the game's translation)
+#   phases   arena states it stands in, e.g. [WAITING, COUNTDOWN, LIVE]
+#   enabled  false removes a game's NPC
+npcs: {}
+#  fireball:
+#    shop:
+#      entity: WANDERING_TRADER
+#      name: "<gold><bold>Fireball Shop"
+#    rules:
+#      menu: rules
+#      name: "<aqua>How to play"
+#      phases: [WAITING, COUNTDOWN]
+
+# Map versions: before a map is saved over, deleted or restored, TeaCore keeps
+# a copy in maps/backups/<game>/<map>/. See /tea map history and /tea map restore.
+maps:
+  keep-versions: 10
+  # database: maps, map versions and waiting rooms live in the database and every
+  # server keeps a local copy, so a new server needs no map files. files: each
+  # server uses only its own plugins/TeaCore/maps and waiting-rooms folders.
+  storage: database
+
+# Discord webhooks: paste a channel's webhook URL (Channel settings >
+# Integrations > Webhooks) for each event you want posted. Empty = off. Each
+# server posts what happens on it, so set the same URLs on every server. The
+# message text is in lang/<locale>.yml under core.discord. Takes effect on
+# /tea reload.
+discord:
+  # Match results: winner, duration, MVP and every player's kills/deaths/assists.
+  match-results:
+    url: ""
+  # Staff actions from /tea admin and the web dashboard (ended matches, kicks, ...).
+  staff-actions:
+    url: ""
+  # Achievement unlocks.
+  achievements:
+    url: ""
+  # This server starting and stopping.
+  server-status:
+    url: ""
 
 # Leaderboard placeholders (%tea_top_...%) are read from the database in the
 # background this often (seconds, minimum 10). Needs a restart to change.
@@ -94,9 +252,21 @@ dashboard:
   # "0.0.0.0" to bind all interfaces, "127.0.0.1" to restrict to localhost.
   bind-address: "0.0.0.0"
   port: 8080
-  # Admin token for API auth. Leave blank on first boot to auto-generate one;
-  # the generated value is written back to this file and printed to console.
+  # Players sign in with /tea dashboard login (permission tea.dashboard.view),
+  # which gives them a one-time link. Set this to the address players open
+  # the dashboard at, e.g. "https://dash.example.com", so the link is
+  # clickable. Without it they get a code to type on the login page.
+  public-url: ""
+  # Break-glass admin login (full access) and Bearer token for scripts. Leave
+  # blank on first boot to auto-generate one; the generated value is written
+  # back to this file. Set to "off" to turn token login off.
   admin-token: ""
+
+# Prometheus metrics at /metrics on the dashboard port (needs dashboard.enabled).
+# Scrapers send this as "Authorization: Bearer <token>". Empty = off. Covers
+# every server on the network: each one sends its stats every 15 seconds.
+metrics:
+  token: ""
 
 # ----------------------------------------------------------------------
 # Map-setup scoreboard. While an admin authors a map (/tea map create|edit),
@@ -116,6 +286,11 @@ map-setup-scoreboard:
 # ----------------------------------------------------------------------
 lobby:
   enabled: false
+
+  # Whether players can hurt each other in the lobby (outside any arena).
+  # false: hits, arrows, potions and TNT between lobby players do nothing.
+  # Games on the same server are not affected.
+  pvp: false
 
   # When false, the lobby will not touch a player's location or gamemode
   # when they join the server or respawn. Turn this off if another hub

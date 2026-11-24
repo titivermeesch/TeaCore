@@ -10,12 +10,6 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 
-/**
- * Top-level {@code /stats [player]} command. Opens an inventory GUI showing
- * the requested player's stats per registered game. Self-view is gated on
- * {@code tea.stats}; viewing another player additionally requires
- * {@code tea.admin}.
- */
 public final class PlayerStatsCommand implements TabExecutor {
 
     private final TeaCorePlugin plugin;
@@ -52,7 +46,6 @@ public final class PlayerStatsCommand implements TabExecutor {
             targetName = player.getName();
         }
 
-        // The YAML stats menu when menus are on; the built-in viewer otherwise.
         var stats = plugin.coreStats().statsOf(targetUuid);
         Map<String, String> menuArgs = new java.util.HashMap<>();
         menuArgs.put("target", targetName);

@@ -1,0 +1,28 @@
+# Map vote, opened by the vote item or /vote while waiting for a match
+# (features.map-voting). Per map: {map_id} {map_name} {votes} {voted}
+# (true for the one you picked) {min} {max}
+enabled: true
+title: "<primary>Vote for a map"
+rows: 3
+pattern:
+  - "#########"
+  - "##MMMMM##"
+  - "########X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'M':
+    source: map-vote
+    item:
+      material: FILLED_MAP
+      name: "<highlight>{map_name}"
+      glow: "{voted}"
+      amount: "{votes}"
+      lore:
+        - "<secondary>Votes: <highlight>{votes}"
+        - "<secondary>Players: <highlight>{min}-{max}"
+        - ""
+        - "<success>Click to vote"
+      actions: ["map-vote:{map_id}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No vote open" }

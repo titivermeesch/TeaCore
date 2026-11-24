@@ -1,5 +1,9 @@
 package me.playbosswar.tea.core.impl.dashboard;
 
+import me.playbosswar.tea.core.impl.dashboard.auth.DashboardAuth;
+import me.playbosswar.tea.core.impl.dashboard.auth.DashboardPermission;
+import me.playbosswar.tea.core.impl.dashboard.auth.DashboardSessions;
+
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
 import io.javalin.http.staticfiles.Location;
@@ -14,19 +18,6 @@ import me.playbosswar.tea.core.impl.config.CoreConfig;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;
 
-/**
- * Embedded HTTP server + WebSocket broadcaster for the TeaCore management
- * dashboard.
- *
- * <p>
- * Javalin (Jetty under the hood) hosts every {@code /api/**} route exposed by
- * {@link DashboardApi} and a single WebSocket at {@code /api/events}. Every
- * HTTP and WebSocket handshake is gated by the admin token configured under
- * {@code dashboard.admin-token}; clients pass it as
- * {@code Authorization: Bearer <token>} or as a {@code ?token=<token>} query
- * param (the browser cannot set custom headers on the WebSocket upgrade, so
- * query-param auth is the intended mechanism for the live feed).
- */
 public final class DashboardServer {
 
     private final CoreConfig.DashboardConfig config;
@@ -36,7 +27,9 @@ public final class DashboardServer {
 
     private Javalin app;
     private DashboardEventBroadcaster broadcaster;
+    private DashboardAuth auth;
     private BukkitTask queueTicker;
+    private me.playbosswar.tea.core.impl.metrics.MetricsCollector metrics;
 
     public DashboardServer(TeaCorePlugin plugin, TeaCoreAPI core,
             CoreConfig.DashboardConfig config, Logger logger) {
@@ -56,9 +49,8 @@ public final class DashboardServer {
                 cfg.showJavalinBanner = false;
                 cfg.jetty.defaultHost = config.bindAddress();
                 cfg.jetty.defaultPort = config.port();
-                // Serve the Vite-built SPA from /dashboard/ on the plugin jar's
-                // classpath. spaRoot makes client-side-routed URLs (e.g.
-                // /arenas) fall back to index.html instead of 404ing.
+                // spaRoot makes client-side-routed URLs (e.g. /arenas) fall back to index.html
+                // instead of 404.
                 cfg.staticFiles.add(staticFiles -> {
                     staticFiles.hostedPath = "/";
                     staticFiles.directory = "/dashboard";
@@ -68,11 +60,31 @@ public final class DashboardServer {
                 cfg.spaRoot.addFile("/", "/dashboard/index.html", Location.CLASSPATH);
             });
 
-            javalin.before("/api/*", ctx -> {
-                if (!authorized(ctx.header("Authorization"), ctx.queryParam("token"))) {
-                    ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "unauthorized"));
-                    ctx.skipRemainingHandlers();
+            this.auth = new DashboardAuth(new DashboardSessions(), plugin.dashboardLoginCodes(),
+                    config.adminToken(), logger);
+            if (plugin.discordEvents() != null) {
+                auth.setStaffSink(plugin.discordEvents()::staff);
+            }
+            javalin.before("/api/*", auth::authenticate);
+            auth.register(javalin);
+
+            // Prometheus: off until metrics.token is set. Separate from the admin token so a
+            // leaked scrape config can't act on the network.
+            this.metrics = new me.playbosswar.tea.core.impl.metrics.MetricsCollector(core.coordination());
+            javalin.get("/metrics", ctx -> {
+                String token = plugin.getConfig().getString("metrics.token", "");
+                if (token == null || token.isBlank()) {
+                    ctx.status(HttpStatus.NOT_FOUND).result("metrics are off (set metrics.token)");
+                    return;
                 }
+                String header = ctx.header("Authorization");
+                String given = header != null && header.startsWith("Bearer ") ? header.substring(7).trim() : "";
+                if (!java.security.MessageDigest.isEqual(given.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        token.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                    ctx.status(HttpStatus.UNAUTHORIZED).result("unauthorized");
+                    return;
+                }
+                ctx.contentType("text/plain; version=0.0.4; charset=utf-8").result(metrics.render());
             });
 
             javalin.get("/api/health", ctx -> ctx.json(Map.of(
@@ -80,17 +92,18 @@ public final class DashboardServer {
                     "version", "dashboard-v1",
                     "sessions", broadcaster == null ? 0 : broadcaster.sessionCount())));
 
-            new DashboardApi(core, plugin).register(javalin);
-
-            this.broadcaster = new DashboardEventBroadcaster(core.coordination(), logger);
+            this.broadcaster = new DashboardEventBroadcaster(core.coordination(), logger,
+                    s -> s.uuid() == null && "token".equals(s.id()) || auth.sessions().get(s.token()).isPresent());
+            new DashboardApi(core, plugin, auth, broadcaster).register(javalin);
 
             javalin.ws("/api/events", ws -> {
                 ws.onConnect(ctx -> {
-                    if (!authorized(null, ctx.queryParam("token"))) {
+                    var session = auth.resolve(ctx.cookie(DashboardAuth.COOKIE), ctx.header("Authorization"));
+                    if (session.isEmpty() || !session.get().can(DashboardPermission.VIEW)) {
                         ctx.closeSession(1008, "unauthorized");
                         return;
                     }
-                    broadcaster.addSession(ctx);
+                    broadcaster.addSession(ctx, session.get());
                 });
                 ws.onClose(ctx -> broadcaster.removeSession(ctx));
                 ws.onError(ctx -> broadcaster.removeSession(ctx));
@@ -99,7 +112,7 @@ public final class DashboardServer {
             javalin.start();
             this.app = javalin;
             logger.info(() -> "Dashboard API listening on " + config.bindAddress()
-                    + ":" + config.port() + " (admin token configured)");
+                    + ":" + config.port());
 
             this.queueTicker = Bukkit.getScheduler().runTaskTimer(plugin, this::pushQueueCounts, 40L, 20L);
         } catch (Exception e) {
@@ -134,31 +147,5 @@ public final class DashboardServer {
             counts.put(def.id().value(), core.coordination().queueFor(def.id()).size());
         }
         broadcaster.broadcastQueueCounts(counts);
-    }
-
-    private boolean authorized(String authHeader, String tokenQuery) {
-        String expected = config.adminToken();
-        if (expected == null || expected.isBlank()) {
-            return false;
-        }
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String candidate = authHeader.substring("Bearer ".length()).trim();
-            if (constantTimeEquals(candidate, expected))
-                return true;
-        }
-        if (tokenQuery != null && constantTimeEquals(tokenQuery, expected)) {
-            return true;
-        }
-        return false;
-    }
-
-    private static boolean constantTimeEquals(String a, String b) {
-        if (a.length() != b.length())
-            return false;
-        int diff = 0;
-        for (int i = 0; i < a.length(); i++) {
-            diff |= a.charAt(i) ^ b.charAt(i);
-        }
-        return diff == 0;
     }
 }

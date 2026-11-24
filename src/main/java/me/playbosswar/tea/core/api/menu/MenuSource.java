@@ -13,9 +13,8 @@ import org.bukkit.entity.Player;
 public interface MenuSource {
 
     /**
-     * @param viewer the player looking at the menu.
-     * @param args   the menu's open arguments (e.g. {@code game=fireball}).
-     * @return the entries, in display order.
+     * @param args the arguments the menu was opened with, e.g. {@code game=fireball}
+     * @return the entries in display order
      */
     List<MenuEntry> entries(Player viewer, Map<String, String> args);
 }

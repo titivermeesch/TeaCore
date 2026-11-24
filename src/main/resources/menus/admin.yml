@@ -1,0 +1,49 @@
+# Arena manager home, opened with /tea admin. One entry per game on the
+# network (source admin-games): {game_id} {game_name} {arenas} {players}
+# {ready} (joinable, with room) {running} (in a match) {queued}
+# {maps} {local} (whether this server runs the game).
+enabled: true
+permission: tea.arena.admin
+title: "<primary>Arena manager"
+rows: 4
+refresh-ticks: 40
+pattern:
+  - "#########"
+  - "#GGGGGGG#"
+  - "#########"
+  - "##A#S#R#X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  'A':
+    material: COMPASS
+    name: "<primary>All arenas"
+    lore: ["<muted>Every arena on every server"]
+    actions: ["open-menu:admin-arenas", "sound:UI_BUTTON_CLICK"]
+  'S':
+    material: COMPARATOR
+    name: "<primary>Settings"
+    lore: ["<muted>Change TeaCore and game settings", "<muted>on every server at once"]
+    actions: ["open-menu:admin-settings", "sound:UI_BUTTON_CLICK"]
+  'R':
+    material: REPEATER
+    name: "<secondary>Reload maps"
+    lore: ["<muted>Same as /tea map reload"]
+    actions: ["admin-reload-maps", "sound:UI_BUTTON_CLICK"]
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'G':
+    source: admin-games
+    item:
+      name: "<primary>{game_name}"
+      lore:
+        - "<secondary>Arenas: <highlight>{arenas}</highlight> <muted>({ready} ready, {running} in a match)"
+        - "<secondary>Players: <highlight>{players}</highlight> <muted>+{queued} queued"
+        - "<secondary>Maps here: <highlight>{maps}"
+        - ""
+        - "<success>Left-click: arenas"
+        - "<muted>Right-click: maps"
+        - "<muted>Shift-click: allocate an arena"
+      left-actions: ["open-menu:admin-arenas game={game_id}"]
+      right-actions: ["open-menu:admin-maps game={game_id}"]
+      shift-actions: ["admin-allocate:{game_id}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No games on the network" }

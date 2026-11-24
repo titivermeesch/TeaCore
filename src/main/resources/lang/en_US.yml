@@ -3,17 +3,103 @@ core:
     win: "<success>Win</success>"
     loss: "<error>Loss</error>"
     draw: "<warning>Draw</warning>"
+    left: "<muted>Left early</muted>"
   achievements:
     unlocked: "<success>Unlocked</success>"
     locked: "<muted>Locked</muted>"
+  quests:
+    off: "<error>Quests are off on this server.</error>"
+    completed: "<success>Quest complete:</success> <highlight><quest></highlight> <muted>(reward: <reward>)</muted>"
+    line: "<secondary><period>:</secondary> <highlight><quest></highlight> <muted><progress>/<amount>, reward <reward></muted>"
+  party:
+    leader-only: "<error>Only your party leader can join games for the party.</error>"
+    pulled: "<secondary>Your party leader</secondary> <highlight><leader></highlight> <secondary>took the party to</secondary> <highlight><game></highlight><secondary>.</secondary>"
+  ranked:
+    off: "<error>Ranked play is off for <game>.</error>"
+    queued: "<success>Queued for ranked</success> <highlight><game></highlight> <muted>(rating <rating>)</muted>"
+    joined: "<accent>Ranked match.</accent> <secondary>Your rating:</secondary> <highlight><rating></highlight>"
+    gained: "<success>+<change> rating</success> <muted>(<rating>)</muted>"
+    lost: "<error>-<change> rating</error> <muted>(<rating>)</muted>"
+    leaderboard:
+      usage: "<secondary>Usage:</secondary> <accent>/leaderboard <game></accent>"
+      header: "<primary>Top players in <game></primary>"
+      line: "<accent>#<rank></accent> <highlight><player></highlight> <secondary><rating></secondary> <muted>(<wins>W <losses>L)</muted>"
+      empty: "<muted>Nobody has played ranked <game> yet.</muted>"
+  waiting-room:
+    usage: "<muted>/tea waiting room edit|pos1|pos2|spawn|save|discard|assign <room> <game> [map]|unassign <game> [map]|list|delete <room>"
+    creating: "<success>New waiting room <highlight><room></highlight>. Build it, then mark it with <highlight>/tea waiting room pos1</highlight>, <highlight>pos2</highlight> and <highlight>spawn</highlight>, and <highlight>save</highlight>."
+    editing: "<success>Editing waiting room <highlight><room></highlight>. Change it, then <highlight>/tea waiting room save</highlight>."
+    pos-set: "<success><which> set where you stand."
+    spawn-set: "<success>Players will appear here, facing where you look."
+    saved: "<success>Saved waiting room <highlight><room></highlight> (<size>). Assign it with <highlight>/tea waiting room assign <room> <game> [map]</highlight>."
+    discarded: "<secondary>Left the editor without saving."
+    assigned: "<success><target> now uses waiting room <highlight><room></highlight> for new arenas."
+    unassigned: "<success><target> has no waiting room of its own now."
+    deleted: "<success>Deleted waiting room <highlight><room></highlight>."
+    unknown: "<error>There is no waiting room called <room>."
+    none: "<muted>No waiting rooms yet. Make one with /tea waiting room edit <name>."
+    list-entry: "<primary><room></primary> <muted>(<size>)</muted> used by <highlight><used></highlight>"
+    failed: "<error><reason>"
+  waiting-area:
+    set: "<success>Players of <highlight><key></highlight> now wait here (world <highlight><world></highlight>) and move into the arena when the countdown ends."
+    cleared: "<success>Removed the <highlight><key></highlight> waiting area. Players wait inside the map again."
+    none: "<muted>No <key> waiting area is set; players wait inside the map."
+    show: "<primary><key></primary> <muted>waiting area:</muted> <highlight><world></highlight> <x>, <y>, <z>"
+  leave-item:
+    name: "<error>Leave"
+    lore: "<muted>Right-click to leave the arena"
+  kit-item:
+    name: "<primary>Choose a kit"
+    lore: "<muted>Right-click to pick your kit"
+  vote:
+    item:
+      name: "<primary>Vote for a map"
+      lore: "<muted>Right-click to pick the map"
+    prompt: "<secondary>Vote for the map with</secondary> <accent>/vote</accent> <secondary>or the map item:</secondary> <highlight><maps></highlight>"
+    voted: "<success>You voted for</success> <highlight><map></highlight> <muted>(<votes> votes)</muted>"
+    unknown: "<error><map> isn't one of the maps in this vote.</error>"
+    none: "<error>There's no map vote open for you right now.</error>"
+    result: "<secondary>Map:</secondary> <highlight><map></highlight> <muted>(<votes> votes)</muted>"
+  spectator:
+    item:
+      teleporter: "<primary>Teleporter"
+      teleporter-lore: "<muted>Right-click: pick a player to watch"
+      again: "<success>Play again"
+      again-lore: "<muted>Right-click: join the next match"
+      leave: "<error>Leave"
+      leave-lore: "<muted>Right-click: back to the lobby"
+    teleported: "<secondary>Teleported to</secondary> <highlight><player></highlight>"
+    following: "<secondary>Watching</secondary> <highlight><player></highlight><secondary>. Sneak to stop.</secondary>"
+    gone: "<error>That player is no longer in the match.</error>"
   menu:
     usage: "<secondary>Usage:</secondary> <accent>/menu <id> [player]</accent>"
     unknown: "<error>No menu called <id>, or it is turned off.</error>"
     no-permission: "<error>You can't open that menu.</error>"
+    bedrock:
+      left: "Select"
+      right: "Right click"
+      shift-left: "Shift + left click"
+      shift-right: "Shift + right click"
+      back: "Back"
     player-offline: "<error><player> is not online.</error>"
+  sidebar:
+    # The <winner> value after a match with no winner (e.g. "<winner> wins!").
+    draw-winner: "Nobody"
   board:
     hidden: "<secondary>Sidebar hidden.</secondary> <muted>Type</muted> <accent>/board</accent> <muted>to show it again.</muted>"
     shown: "<success>Sidebar shown.</success>"
+  settings:
+    saved: "<success>Saved.</success> <muted><note></muted>"
+    saved-remote: "<success>Sent to <servers> server(s).</success> <muted><note></muted>"
+    invalid: "<error><reason></error>"
+    prompt: "<secondary>Type the new value for</secondary> <highlight><setting></highlight> <secondary>in chat, or</secondary> <accent>cancel</accent><secondary>.</secondary>"
+    prompt-id: "<secondary>Type an id for the new entry in chat (letters, digits, - and _), or</secondary> <accent>cancel</accent><secondary>.</secondary>"
+    prompt-cancelled: "<muted>Cancelled.</muted>"
+    prompt-expired: "<muted>Nothing typed, so nothing changed.</muted>"
+    bad-id: "<error>Ids use letters, digits, - and _ only.</error>"
+    id-taken: "<error><id> already exists.</error>"
+    hold-item: "<error>Hold the item you want in your hand, or right-click to type a name.</error>"
+    shift-to-copy: "<secondary>Shift-click to replace the list with your inventory.</secondary>"
   reload:
     success: "<success>Configuration reloaded.</success>"
     failed: "<error>Reload failed: <reason></error>"
@@ -26,17 +112,45 @@ core:
     no-permission: "<error>You don't have permission to use that.</error>"
     unknown: "<error>Unknown subcommand. Try </error><accent>/tea help</accent><error>.</error>"
     player-only: "<error>This command can only be run by a player.</error>"
+    player-not-found: "<error>No online player called <player>.</error>"
     lobby-disabled: "<error>Lobby features are disabled on this server.</error> <muted>Set </muted><accent>lobby.enabled: true</accent><muted> in </muted><accent>plugins/TeaCore/config.yml</accent><muted> and restart.</muted>"
   help:
     header: "<primary><bold>TeaCore commands</bold></primary>"
     entry: "<accent>/tea <cmd></accent> <muted>-</muted> <secondary><desc></secondary>"
     reload: "<accent>/tea reload</accent> <muted>-</muted> <secondary>Reload config, theme, and locale bundles</secondary>"
     version: "<accent>/tea version</accent> <muted>-</muted> <secondary>Show the running TeaCore version</secondary>"
+    admin: "<accent>/tea admin</accent> <muted>-</muted> <secondary>Open the arena manager menu</secondary>"
+    dashboard: "<accent>/tea dashboard login</accent> <muted>-</muted> <secondary>Get a one-time link to sign in to the web dashboard</secondary>"
     arena: "<accent>/tea arena</accent> <muted>-</muted> <secondary>Manage arenas (run it to list subcommands)</secondary>"
     game: "<accent>/tea game list</accent> <muted>-</muted> <secondary>Show registered games</secondary>"
     map: "<accent>/tea map</accent> <muted>-</muted> <secondary>Create and edit arena maps</secondary>"
     stats: "<accent>/tea stats [player]</accent> <muted>-</muted> <secondary>Show stats for a player across all games</secondary>"
     hint-arena: "<muted>Type </muted><accent>/tea arena</accent><muted> for the full arena subcommand list.</muted>"
+  dashboard:
+    usage: "<secondary>Usage:</secondary> <accent>/dashboard</accent> <secondary>or</secondary> <accent>/tea dashboard login</accent>"
+    login:
+      code: "<secondary>Your dashboard login code is</secondary> <accent><code></accent><secondary>. Enter it on the dashboard's login page within 2 minutes.</secondary>"
+      link: "<secondary>Dashboard login (code</secondary> <accent><code></accent><secondary>, valid for 2 minutes):</secondary>"
+      link-label: "Click to open the dashboard"
+      failed: "<error>Could not create a login code. Check the server log.</error>"
+  discord:
+    match:
+      title: "<game> on <map>"
+      winner: "Winner"
+      draw: "Draw"
+      duration: "Duration"
+      mvp: "MVP"
+      players: "Players"
+      player-line: "<player> <team> - <kills>/<deaths>/<assists>"
+    staff:
+      title: "Staff action"
+      line: "<actor> <action>"
+    achievement:
+      title: "Achievement unlocked"
+      line: "<player> unlocked <name> in <game>"
+    server:
+      online: "<server> is online"
+      offline: "<server> went offline"
   boot:
     ready: "<success>TeaCore online.</success>"
   countdown:
@@ -86,9 +200,38 @@ core:
     start:
       usage: "<secondary>Usage:</secondary> <accent>/tea arena start <arenaId></accent>"
       done: "<success>Arena</success> <accent><id></accent> <success>skipped to the next phase.</success>"
+    admin:
+      menu-disabled: "<error>The arena manager menu is turned off.</error>"
+      sending: "<secondary>Sending you to</secondary> <accent><server></accent><secondary>...</secondary>"
+      started: "<success>Arena</success> <accent><id></accent> <success>moves to the next phase.</success>"
+      released: "<warning>Released arena</warning> <accent><id></accent><warning>.</warning>"
+      ended: "<success>Ended the match in arena</success> <accent><id></accent><success>.</success>"
+      not-live: "<error>Arena</error> <accent><id></accent> <error>has no match running.</error>"
+      kicked: "<warning>Kicked</warning> <accent><player></accent> <warning>from arena</warning> <accent><id></accent><warning>.</warning>"
+      made-spectator: "<success><player> is now spectating.</success>"
+      moved: "<success>Moving</success> <accent><player></accent> <success>to arena</success> <accent><id></accent><success>.</success>"
+      allocated: "<success>Allocating a</success> <accent><game></accent> <success>arena</success> <muted>(map: <map>)</muted>"
+      no-host: "<error>No server runs</error> <accent><game></accent><error>.</error>"
+      kicked-notice: "<warning>A staff member removed you from the match.</warning>"
+      ended-broadcast: "<warning>A staff member ended the match.</warning>"
+      spectator-notice: "<warning>A staff member made you a spectator.</warning>"
+      moved-notice: "<secondary>A staff member moved you to another arena.</secondary>"
+      role:
+        player: "Player"
+        spectator: "Spectator"
+      state:
+        allocating: "<muted>Allocating"
+        waiting: "<success>Waiting"
+        countdown: "<warning>Countdown"
+        starting: "<warning>Starting"
+        live: "<error>Live"
+        ending: "<muted>Ending"
+        resetting: "<muted>Resetting"
+        released: "<muted>Released"
   queue:
     bossbar: "<accent>Queued:</accent> <primary><game></primary> <muted>-</muted> #<position><muted>/</muted><total>"
   map:
+    leave-arena-first: "<error>Leave your arena first (/leave), then start editing."
     usage: "<secondary>Run </secondary><accent>/tea map help</accent><secondary> for the full subcommand list.</secondary>"
     help:
       header: "<primary><bold>Map subcommands</bold></primary>"
@@ -110,7 +253,9 @@ core:
       list: "<accent>/tea map list [game]</accent> <muted>-</muted> <secondary>List registered maps</secondary>"
       info: "<accent>/tea map info <game> <map></accent> <muted>-</muted> <secondary>Show details for a saved map</secondary>"
       reload: "<accent>/tea map reload</accent> <muted>-</muted> <secondary>Re-read every map yaml from disk</secondary>"
-      delete: "<accent>/tea map delete <game> <map></accent> <muted>-</muted> <secondary>Permanently delete a saved map and its schematic</secondary>"
+      delete: "<accent>/tea map delete <game> <map></accent> <muted>-</muted> <secondary>Delete a saved map (a backup is kept)</secondary>"
+      history: "<accent>/tea map history <game> <map></accent> <muted>-</muted> <secondary>List a map's older versions</secondary>"
+      restore: "<accent>/tea map restore <game> <map> <n></accent> <muted>-</muted> <secondary>Put version n back</secondary>"
       hint-extensions: "<muted>Game plugins may add their own subcommands; run </muted><accent>/tea map status</accent><muted> to see required ones.</muted>"
     displayname:
       set: "<success>Display name for</success> <accent><map></accent> <success>set to</success> <highlight><name></highlight>"
@@ -138,6 +283,52 @@ core:
     extension:
       set: "<success>Updated</success> <accent><id></accent>"
       failed: "<error>Extension</error> <accent><id></accent> <error>failed: <reason></error>"
+      other-game: "<error>The point</error> <accent><id></accent> <error>isn't used by</error> <accent><game></accent> <error>maps.</error>"
+    editor:
+      started: "<secondary>Editing tools are on your hotbar. Open the</secondary> <accent>checklist</accent> <secondary>(slot 8) to see what's left.</secondary>"
+      selected: "<secondary>Point tool:</secondary> <accent><type></accent>"
+      placed: "<success>Placed</success> <accent><type></accent> <muted>#<count> at <x>, <y>, <z></muted>"
+      removed: "<warning>Removed</warning> <accent><point></accent> <muted>(<type>: <count> left)</muted>"
+      nothing-targeted: "<muted>Look at a marker within 1.5 blocks to remove it.</muted>"
+      cleared: "<warning>Removed every</warning> <accent><type></accent> <warning>point.</warning>"
+      no-points: "<muted>No</muted> <accent><type></accent> <muted>points yet.</muted>"
+      markers-shown: "<secondary>Markers shown.</secondary>"
+      markers-hidden: "<secondary>Markers hidden.</secondary>"
+      type:
+        spawns: "Spawns"
+        waiting: "Waiting spawn"
+      status:
+        set: "<success>Done"
+        missing: "<error>Required"
+        optional: "<muted>Optional"
+      info:
+        region:
+          label: "Region"
+          unset: "Not set"
+          hint: "Region wand: left-click pos1, right-click pos2. Here: left/right-click to teleport to a corner."
+        players:
+          label: "Players (min - max)"
+          hint: "Left/right-click: min +1/-1. Shift-left/right: max +1/-1."
+        name:
+          label: "Display name"
+          hint: "Set with /tea map displayname <name>"
+        ready:
+          "yes": "Ready to save"
+          "no": "Steps missing"
+          hint: "Left-click to save"
+      tool:
+        region:
+          name: "<accent>Region wand"
+          lore: "<muted>Left-click a block: pos1\n<muted>Right-click a block: pos2"
+        point:
+          name: "<accent>Point tool: <primary><type></primary> <muted>(<count>)"
+          lore: "<muted>Right-click a block: place on top\n<muted>Right-click air: place at your feet\n<muted>Left-click a marker: remove it\n<muted>Sneak + scroll: change type (<index>/<total>)"
+        checklist:
+          name: "<accent>Checklist"
+          lore: "<muted>What's done and what's left"
+        save:
+          name: "<success>Save map"
+          lore: "<muted>Same as /tea map save"
     removeextension:
       usage: "<secondary>Usage:</secondary> <accent>/tea map removeextension <id-or-subcommand></accent>"
       done: "<warning>Removed extension</warning> <accent><id></accent>"
@@ -220,6 +411,22 @@ core:
       usage: "<secondary>Usage:</secondary> <accent>/tea map delete <game> <map></accent>"
       done: "<success>Deleted map</success> <accent><game>/<map></accent>"
       failed: "<error>Delete failed: <reason></error>"
+    history:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map history <game> <map></accent>"
+      header: "<primary>Versions of <accent><game>/<map></accent> <muted>(newest first)</muted></primary>"
+      line: "<accent>#<n></accent> <secondary><when></secondary> <muted>-</muted> <highlight><actor></highlight> <muted>(<reason>)</muted>"
+      none: "<muted>No older versions of <game>/<map>.</muted>"
+      hint: "<muted>Restore one with</muted> <accent>/tea map restore <game> <map> <n></accent>"
+    import:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map import <game> <map> <world folder> <points file></accent>"
+      done: "<success>Imported</success> <accent><game>/<map></accent> <muted>(<size>)</muted>"
+      failed: "<error>Import failed: <reason></error>"
+    restore:
+      usage: "<secondary>Usage:</secondary> <accent>/tea map restore <game> <map> <n></accent>"
+      done: "<success>Restored</success> <accent><game>/<map></accent> <success>to version #<n>.</success> <muted>The map it replaced, if any, is now #1.</muted>"
+      no-version: "<error>There is no version #<n> of <game>/<map>.</error> <muted>See</muted> <accent>/tea map history <game> <map></accent>"
+      editing: "<error>Someone is editing <game>/<map>. Save or discard that first.</error>"
+      failed: "<error>Restore failed: <reason></error>"
   kit-picker:
     usage: "<secondary>Usage:</secondary> <accent>/kit [game] [kitId]</accent><muted>. Run inside an arena to auto-fill the game.</muted>"
     title: "Select kit: <game>"
@@ -258,6 +465,7 @@ core:
         name: "<accent><bold><game></bold></accent>"
         entry: "<secondary><label></secondary><muted>:</muted> <highlight><value></highlight>"
         empty: "<secondary>No stats recorded yet.</secondary>"
+        rating: "<accent>Ranked:</accent> <highlight><rating></highlight> <muted>(#<rank>, <wins>W <losses>L)</muted>"
       close: "<error>Close</error>"
   game:
     list:

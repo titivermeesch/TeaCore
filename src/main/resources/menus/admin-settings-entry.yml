@@ -1,0 +1,36 @@
+# One entry of a list or map setting, such as a kit or a quest (arguments:
+# file, base = the entry's path, title). Same values as admin-settings-fields.
+enabled: true
+permission: tea.settings
+title: "<primary>Settings <muted>- {title}"
+rows: 6
+pattern:
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "FFFFFFFFF"
+  - "B##<D>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: "settings-up:{file}|{base}" }
+  'D':
+    material: LAVA_BUCKET
+    name: "<error>Remove {title}"
+    lore: ["<muted>Asks first"]
+    actions: ["confirm:Remove {title}?|settings-delete:{file}|{base}"]
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'F':
+    source: settings-fields
+    item:
+      name: "<primary>{title}"
+      lore:
+        - "<secondary>Now: <highlight>{value}"
+        - "<muted>{info}"
+        - ""
+        - "<success>{controls}"
+      actions: ["settings-field:{file}|{path}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No settings" }

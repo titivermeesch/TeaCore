@@ -30,11 +30,7 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
     private volatile ThemeImpl theme;
 
     private final Map<String, String> localeResolutionCache = new ConcurrentHashMap<>();
-    /**
-     * Plugins that have called {@link #registerBundles} along with the locales
-     * they registered. Replayed on {@link #replaceBundles} so {@code /tea reload}
-     * doesn't drop game-plugin translations until the next restart.
-     */
+    /** Replayed on {@link #replaceBundles} so {@code /tea reload} keeps game-plugin translations. */
     private final Map<org.bukkit.plugin.Plugin, List<String>> registeredSources = new ConcurrentHashMap<>();
 
     public MessageServiceImpl(
@@ -54,9 +50,6 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
         this.bundles.clear();
         this.bundles.putAll(bundles);
         this.localeResolutionCache.clear();
-        // Re-merge each plugin's contributions on top of the freshly-loaded core
-        // bundles. Without this, /tea reload would wipe every game-plugin key
-        // until the next server restart.
         for (Map.Entry<org.bukkit.plugin.Plugin, List<String>> entry : registeredSources.entrySet()) {
             mergePluginBundles(entry.getKey(), entry.getValue());
         }
@@ -64,6 +57,7 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
 
     public void replaceTheme(ThemeImpl theme) {
         this.theme = theme;
+        inlineCache.invalidateAll();
     }
 
     @Override
@@ -151,12 +145,32 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
 
     @Override
     public String renderInline(String miniMessageInput, Map<String, String> placeholders) {
-        return legacySerializer.serialize(renderRaw(miniMessageInput, placeholders));
+        // Sidebars and menus render the same lines with the same values over and
+        // over; parsing MiniMessage was their biggest cost. Output depends only on
+        // the input, the values and the theme, so cache it (cleared on reload).
+        String key = inlineKey(miniMessageInput, placeholders);
+        return inlineCache.get(key, k -> legacySerializer.serialize(renderRaw(miniMessageInput, placeholders)));
+    }
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, String> inlineCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .maximumSize(20_000)
+                    .expireAfterAccess(java.time.Duration.ofMinutes(2))
+                    .build();
+
+    private static String inlineKey(String input, Map<String, String> placeholders) {
+        if (placeholders == null || placeholders.isEmpty()) {
+            return input;
+        }
+        StringBuilder sb = new StringBuilder(input.length() + placeholders.size() * 16).append(input);
+        placeholders.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> sb.append('\u0000').append(e.getKey()).append('\u0001').append(e.getValue()));
+        return sb.toString();
     }
 
     @Override
     public String renderPlainText(String locale, String key, Map<String, String> placeholders) {
-        // Strip legacy section codes ("§" + following char) to get plain text.
         return renderLegacyNoPrefix(locale, key, placeholders)
                 .replaceAll("\u00a7[0-9a-fk-orA-FK-OR]", "");
     }
@@ -177,7 +191,7 @@ public final class MessageServiceImpl implements MessageService, AutoCloseable {
 
     @Override
     public String resolveLocale(Player player) {
-        String raw = player.getLocale();
+        String raw = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().players().locale(player);
         return localeResolutionCache.computeIfAbsent(raw, this::pickBundleLocale);
     }
 

@@ -4,7 +4,7 @@ import me.playbosswar.tea.core.api.feature.FeatureService;
 import me.playbosswar.tea.core.api.game.GameId;
 import org.bukkit.plugin.Plugin;
 
-/** Reads {@code features.*} from TeaCore's live config on every call. */
+/** Reads the live config on every call so reloads apply at once. */
 public final class FeatureServiceImpl implements FeatureService {
 
     private final Plugin plugin;

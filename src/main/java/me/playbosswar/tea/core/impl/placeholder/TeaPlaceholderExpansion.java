@@ -6,10 +6,7 @@ import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * The {@code %tea_...%} PlaceholderAPI expansion. A thin adapter over
- * {@link PlaceholderService}; only loaded when PlaceholderAPI is installed.
- */
+/** Only loaded when PlaceholderAPI is installed. */
 public final class TeaPlaceholderExpansion extends PlaceholderExpansion {
 
     private final PlaceholderService service;

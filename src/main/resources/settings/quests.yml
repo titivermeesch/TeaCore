@@ -1,0 +1,40 @@
+# Which parts of quests.yml staff can change from /tea admin and the dashboard.
+id: teacore-quests
+title: Quests
+file: quests.yml
+icon: WRITABLE_BOOK
+apply: live
+categories:
+  - id: general
+    title: General
+    icon: CLOCK
+    fields:
+      - { path: settings.daily-count, type: int, min: 0, max: 10, title: Daily quests per player }
+      - { path: settings.weekly-count, type: int, min: 0, max: 10, title: Weekly quests per player }
+      - { path: settings.reset-hour, type: int, min: 0, max: 23, title: Reset hour, help: "When days and weeks start, in server time. Weeks start on Monday." }
+  - id: daily
+    title: Daily quests
+    icon: SUNFLOWER
+    fields:
+      - &quests
+        path: daily
+        type: map
+        title: Daily quests
+        help: "The pool daily quests are picked from."
+        new-entry: { name: "New quest", goal: wins, amount: 1, game: any, reward: { coins: 50 } }
+        fields:
+          - { path: name, type: text, title: Name }
+          - { path: goal, type: enum, options: [wins, games, kills, assists], title: Goal, help: "games counts finished matches." }
+          - { path: amount, type: int, min: 1, max: 100000, title: Amount }
+          - { path: game, type: text, title: Game, help: "A game id such as fireball, or any." }
+          - { path: reward.coins, type: number, min: 0, step: 10, title: Coin reward, help: "Paid through your economy plugin." }
+          - { path: reward.commands, type: text-list, title: Reward commands, help: "Run from the console. {player} is the player's name." }
+  - id: weekly
+    title: Weekly quests
+    icon: CLOCK
+    fields:
+      - <<: *quests
+        path: weekly
+        title: Weekly quests
+        help: "The pool weekly quests are picked from."
+        new-entry: { name: "New quest", goal: wins, amount: 10, game: any, reward: { coins: 300 } }

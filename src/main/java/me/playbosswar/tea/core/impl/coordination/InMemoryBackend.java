@@ -19,10 +19,6 @@ import me.playbosswar.tea.core.api.coordination.CoordinationEvent;
 import me.playbosswar.tea.core.api.coordination.QueueEntry;
 import me.playbosswar.tea.core.api.game.GameId;
 
-/**
- * Single-JVM coordination for {@code network.mode: standalone}. No Redis
- * needed.
- */
 public final class InMemoryBackend implements CoordinationBackend {
 
     private final String serverId;
@@ -160,7 +156,6 @@ public final class InMemoryBackend implements CoordinationBackend {
 
     @Override
     public void releaseMatchmakerLock() {
-        // no-op
     }
 
     @Override

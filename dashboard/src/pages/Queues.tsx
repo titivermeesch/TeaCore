@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { UserMinus } from 'lucide-react';
 import { api, apiDelete } from '../api';
+import { P, useCan } from '../auth';
 import type { QueueEntry } from '../types';
 import { useDashboardWs } from '../ws';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -83,6 +84,7 @@ function QueueCard({
     liveCount: number;
     onDequeue: (uuid: string, name: string) => void;
 }) {
+    const canRemove = useCan(P.queueRemove);
     return (
         <Card>
             <CardHeader>
@@ -117,13 +119,15 @@ function QueueCard({
                                     </Td>
                                     <Td className="font-mono text-xs text-muted">{formatAgo(e.queuedAt)}</Td>
                                     <Td className="text-right">
-                                        <Button
-                                            variant="ghost"
-                                            title="Remove from queue"
-                                            onClick={() => onDequeue(e.playerUuid, e.playerName)}
-                                        >
-                                            <UserMinus className="h-4 w-4" />
-                                        </Button>
+                                        {canRemove && (
+                                            <Button
+                                                variant="ghost"
+                                                title="Remove from queue"
+                                                onClick={() => onDequeue(e.playerUuid, e.playerName)}
+                                            >
+                                                <UserMinus className="h-4 w-4" />
+                                            </Button>
+                                        )}
                                     </Td>
                                 </Tr>
                             ))}

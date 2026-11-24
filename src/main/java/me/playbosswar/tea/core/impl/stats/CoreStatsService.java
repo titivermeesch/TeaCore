@@ -25,18 +25,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Tracks game-agnostic per-player stats - games played, wins, losses, kills,
- * deaths, assists - across every TeaCore game, so the core can expose totals
- * (and derived win-rate / KDR) as placeholders without each game implementing
- * its own counters. Wins/losses come from {@link MatchEndEvent} (every member of
- * a winning team wins; a draw counts as played only); kills/deaths/assists from {@link ArenaKillEvent}, which
- * the combat tracker fires for real deaths and for deaths games report
- * themselves. Writes run async off the event thread; reads are cached.
- */
+/** Writes run async off the event thread; reads are cached. */
 public final class CoreStatsService implements Listener {
 
-    /** Immutable snapshot of a player's core stats. */
     public record CoreStats(int gamesPlayed, int wins, int losses, int kills, int deaths, int assists) {
         static final CoreStats EMPTY = new CoreStats(0, 0, 0, 0, 0, 0);
     }

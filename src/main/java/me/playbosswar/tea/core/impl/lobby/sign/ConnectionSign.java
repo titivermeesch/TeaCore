@@ -5,13 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * A bound connection sign in the world. {@code mapFilter} is nullable - when
- * present,
- * only arenas running that specific map are considered when aggregating counts
- * and
- * when routing clicks.
- */
+/** {@code mapFilter}: when set, only arenas running that map are counted and joined. */
 public record ConnectionSign(String world, int x, int y, int z, GameId gameId, @Nullable String mapFilter) {
 
     public boolean acceptsAnyMap() {

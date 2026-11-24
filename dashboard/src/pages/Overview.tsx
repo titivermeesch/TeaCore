@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Activity, Gamepad2, Swords, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { Arena, GameSummary } from '../types';
+import type { Arena, GameSummary, KillEvent } from '../types';
+import { KillFeed } from '../components/KillFeed';
 import { useDashboardEvent, useDashboardWs } from '../ws';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -12,6 +14,7 @@ export default function Overview() {
     const [games, setGames] = useState<GameSummary[]>([]);
     const [arenas, setArenas] = useState<Arena[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const [kills, setKills] = useState<KillEvent[]>([]);
     const { queueCounts } = useDashboardWs();
 
     useEffect(() => {
@@ -23,6 +26,7 @@ export default function Overview() {
                 ]);
                 setGames(g);
                 setArenas(a);
+                setKills(await api<KillEvent[]>('/api/feed/kills'));
             } catch (err) {
                 setError((err as Error).message);
             }
@@ -40,6 +44,8 @@ export default function Overview() {
             );
         } else if (event.type === 'arena.player.join' || event.type === 'arena.player.leave') {
             api<Arena[]>('/api/arenas').then(setArenas).catch(() => {});
+        } else if (event.type === 'arena.kill') {
+            setKills((prev) => [...prev, event].slice(-30));
         }
     });
 
@@ -97,7 +103,9 @@ export default function Overview() {
                             <Tbody>
                                 {arenas.map((a) => (
                                     <Tr key={a.id}>
-                                        <Td className="font-medium">{a.gameId}</Td>
+                                        <Td className="font-medium">
+                                            <Link to={`/arenas/${a.id}`} className="text-primary hover:underline">{a.gameId}</Link>
+                                        </Td>
                                         <Td>{a.mapId ?? '-'}</Td>
                                         <Td>
                                             <Badge variant={stateVariant(a.state)}>{a.state}</Badge>
@@ -113,6 +121,14 @@ export default function Overview() {
                             </Tbody>
                         </Table>
                     )}
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Recent kills</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <KillFeed kills={kills.slice(-30)} showArena empty="No kills since the dashboard started." />
                 </CardContent>
             </Card>
         </div>

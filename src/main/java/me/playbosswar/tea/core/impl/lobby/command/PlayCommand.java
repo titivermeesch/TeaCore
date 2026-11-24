@@ -17,13 +17,6 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/**
- * {@code /play <game> [map]}. In standalone mode we go direct: find-or-allocate
- * local arena
- * and add the player. In multi-server/bungeecord mode we publish a queue entry;
- * the
- * leader-elected Matchmaker in TeaCore routes the player to the right backend.
- */
 public final class PlayCommand implements TabExecutor {
 
     private final Plugin plugin;
@@ -41,7 +34,6 @@ public final class PlayCommand implements TabExecutor {
             return true;
         }
         if (args.length == 0) {
-            // The game selector menu when menus are on; the usage line otherwise.
             if (!core.menus().open(player, "play", java.util.Map.of())) {
                 core.messageService().send(player, "lobby.play.usage");
             }
@@ -50,16 +42,69 @@ public final class PlayCommand implements TabExecutor {
 
         GameId gameId = GameId.of(args[0].toLowerCase(Locale.ROOT));
         String mapFilter = args.length >= 2 ? args[1] : null;
+        boolean ranked = "ranked".equalsIgnoreCase(mapFilter);
+        if (ranked) {
+            mapFilter = null;
+            var ratings = ratings();
+            if (ratings == null || !ratings.enabled(gameId)) {
+                core.messageService().send(player, "core.ranked.off", Map.of("game", gameId.value()));
+                return true;
+            }
+            if (!player.hasPermission("tea.ranked")) {
+                core.messageService().send(player, "core.command.no-permission");
+                return true;
+            }
+        }
+
+        // A party leader's /play brings every member on this server who is not in a match.
+        List<Player> group = new java.util.ArrayList<>(List.of(player));
+        String partyId = null;
+        var parties = plugin instanceof me.playbosswar.tea.core.impl.TeaCorePlugin tc ? tc.parties() : null;
+        var party = parties == null ? Optional.<me.playbosswar.tea.core.impl.party.PartyProvider.Party>empty()
+                : parties.partyOf(player.getUniqueId());
+        if (party.isPresent()) {
+            if (!party.get().leader().equals(player.getUniqueId()) && parties.leaderOnly()) {
+                core.messageService().send(player, "core.party.leader-only");
+                return true;
+            }
+            partyId = party.get().id();
+            for (java.util.UUID uuid : party.get().members()) {
+                Player member = org.bukkit.Bukkit.getPlayer(uuid);
+                if (member != null && !member.equals(player) && core.arenas().arenaOf(uuid).isEmpty()) {
+                    group.add(member);
+                }
+            }
+        }
 
         if (core.isStandalone()) {
-            handleStandalone(player, gameId, mapFilter);
+            handleStandalone(group, gameId, mapFilter, ranked);
         } else {
-            handleQueued(player, gameId, mapFilter);
+            handleQueued(group, gameId, mapFilter, ranked, partyId);
         }
         return true;
     }
 
-    private void handleStandalone(Player player, GameId gameId, String mapFilter) {
+    private int groupRating(List<Player> group, GameId gameId) {
+        var ratings = ratings();
+        if (ratings == null) {
+            return 0;
+        }
+        return (int) group.stream().mapToInt(p -> ratings.get(p.getUniqueId(), gameId).rating()).average().orElse(0);
+    }
+
+    private void tellPulled(List<Player> group, GameId gameId) {
+        for (Player member : group.subList(1, group.size())) {
+            core.messageService().send(member, "core.party.pulled", Map.of(
+                    "leader", group.get(0).getName(), "game", gameId.value()));
+        }
+    }
+
+    private me.playbosswar.tea.core.impl.rating.RatingService ratings() {
+        return plugin instanceof me.playbosswar.tea.core.impl.TeaCorePlugin tc ? tc.ratings() : null;
+    }
+
+    private void handleStandalone(List<Player> group, GameId gameId, String mapFilter, boolean ranked) {
+        Player player = group.get(0);
         Optional<GameDefinition> optDef = core.games().get(gameId);
         if (optDef.isEmpty()) {
             core.messageService().send(player, "lobby.play.unknown-game",
@@ -67,12 +112,31 @@ public final class PlayCommand implements TabExecutor {
             return;
         }
 
-        Arena target = findWaitingArena(gameId, mapFilter)
+        var ratings = ratings();
+        int rating = groupRating(group, gameId);
+        Arena target = findWaitingArena(gameId, mapFilter, ranked, rating, group.size())
                 .orElseGet(() -> allocate(player, gameId, mapFilter));
         if (target == null)
             return;
 
+        if (ratings != null) {
+            ratings.intend(player.getUniqueId(), ranked);
+        }
         boolean joined = core.arenas().addPlayer(target.id(), player, false);
+        if (joined && group.size() > 1) {
+            for (Player member : group.subList(1, group.size())) {
+                if (ratings != null) {
+                    ratings.intend(member.getUniqueId(), ranked);
+                }
+                core.arenas().addPlayer(target.id(), member, false);
+            }
+            tellPulled(group, gameId);
+        }
+        if (joined && mapFilter != null && plugin instanceof me.playbosswar.tea.core.impl.TeaCorePlugin tc
+                && tc.mapVoting() != null) {
+            // The player asked for this map: don't vote it away.
+            tc.mapVoting().lock(target.id());
+        }
         if (joined) {
             core.messageService().send(player, "lobby.play.joined", Map.of(
                     "game", gameId.value(),
@@ -84,18 +148,28 @@ public final class PlayCommand implements TabExecutor {
         }
     }
 
-    private void handleQueued(Player player, GameId gameId, String mapFilter) {
-        // Validate against the fleet-wide hosted-games view rather than the
-        // local registry; the lobby never has the game plugin loaded.
+    private void handleQueued(List<Player> group, GameId gameId, String mapFilter, boolean ranked, String partyId) {
+        Player player = group.get(0);
+        // Fleet-wide view: the lobby never has the game plugin loaded.
         if (!core.coordination().allHostedGames().contains(gameId)) {
             core.messageService().send(player, "lobby.play.unknown-game",
                     Map.of("game", gameId.value()));
             return;
         }
         List<String> mapIds = mapFilter == null ? List.of() : List.of(mapFilter);
-        QueueEntry entry = new QueueEntry(
-                player.getUniqueId(), player.getName(), gameId, mapIds, Instant.now());
-        core.coordination().enqueue(entry);
+        var ratings = ratings();
+        int rating = groupRating(group, gameId);
+        Instant now = Instant.now();
+        for (Player member : group) {
+            core.coordination().enqueue(new QueueEntry(member.getUniqueId(), member.getName(), gameId, mapIds, now,
+                    ranked, rating, group.size() > 1 ? partyId : null, group.size()));
+        }
+        tellPulled(group, gameId);
+        if (ranked) {
+            core.messageService().send(player, "core.ranked.queued", Map.of(
+                    "game", gameId.value(), "rating", String.valueOf(rating)));
+            return;
+        }
         core.messageService().send(player, "lobby.play.queued", Map.of(
                 "game", gameId.value(),
                 "map", mapFilter == null ? "any" : mapFilter));
@@ -105,8 +179,7 @@ public final class PlayCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
-            // Use the fleet-wide hosted-games view so completion still works on
-            // a lobby server that doesn't load any game plugins itself.
+            // Fleet-wide view, so completion works on a lobby without game plugins.
             return core.coordination().allHostedGames().stream()
                     .map(GameId::value)
                     .filter(s -> s.startsWith(prefix))
@@ -116,10 +189,15 @@ public final class PlayCommand implements TabExecutor {
             String prefix = args[1].toLowerCase(Locale.ROOT);
             try {
                 GameId g = GameId.of(args[0]);
-                return core.maps().forGame(g).stream()
+                List<String> out = new java.util.ArrayList<>(core.maps().forGame(g).stream()
                         .map(m -> m.mapId())
                         .filter(s -> s.startsWith(prefix))
-                        .toList();
+                        .toList());
+                var ratings = ratings();
+                if (ratings != null && ratings.enabled(g) && "ranked".startsWith(prefix)) {
+                    out.add("ranked");
+                }
+                return out;
             } catch (Exception e) {
                 return List.of();
             }
@@ -127,14 +205,25 @@ public final class PlayCommand implements TabExecutor {
         return List.of();
     }
 
-    private Optional<Arena> findWaitingArena(GameId gameId, String mapFilter) {
+    private Optional<Arena> findWaitingArena(GameId gameId, String mapFilter, boolean ranked, int rating, int room) {
+        var ratings = ratings();
         return core.arenas().all().stream()
                 .filter(a -> a.gameId().equals(gameId))
-                .filter(a -> a.state() == ArenaState.WAITING || a.state() == ArenaState.COUNTDOWN)
-                .filter(a -> a.players().size() < a.maxPlayers())
+                // An arena still pasting its map (ALLOCATING) takes players too:
+                // they join once it is ready, so friends queueing together
+                // don't each get a fresh arena.
+                .filter(a -> a.state() == ArenaState.WAITING || a.state() == ArenaState.COUNTDOWN
+                        || a.state() == ArenaState.ALLOCATING)
+                .filter(a -> a.players().size() + pendingOf(a) + room <= a.maxPlayers())
                 .filter(a -> mapFilter == null || a.mapId().map(mapFilter::equalsIgnoreCase).orElse(false))
-                .findFirst()
+                .filter(a -> ratings == null || ratings.accepts(a, ranked, rating))
+                .max(java.util.Comparator.comparingInt(a -> a.players().size() + pendingOf(a)))
                 .map(a -> (Arena) a);
+    }
+
+    private int pendingOf(Arena arena) {
+        return core.arenas() instanceof me.playbosswar.tea.core.impl.arena.ArenaManagerImpl impl
+                ? impl.pendingJoins(arena.id()) : 0;
     }
 
     private Arena allocate(Player player, GameId gameId, String mapFilter) {

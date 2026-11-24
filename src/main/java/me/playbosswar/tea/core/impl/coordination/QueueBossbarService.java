@@ -10,9 +10,9 @@ import me.playbosswar.tea.core.api.coordination.QueueEntry;
 import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.message.MessageService;
 import org.bukkit.Bukkit;
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
+import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.platform.bukkit.BukkitAudiences;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -21,25 +21,32 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
- * Shows a persistent bossbar to each player currently in a queue, with their
- * position and the queue length. Refreshes every second by walking the
- * online-player list and asking the {@link CoordinationBackend} whether each
- * player is queued anywhere - so this works on the lobby server even though
- * no game plugin is registered locally.
+ * Asks the {@link CoordinationBackend} per online player, so it works on a lobby
+ * with no game plugin registered.
  */
 public final class QueueBossbarService implements Listener {
 
     private final Plugin plugin;
     private final CoordinationBackend backend;
     private final MessageService messageService;
+    // Adventure boss bars: native on 1.9+, emulated on 1.8 by the platform adapter.
+    private final BukkitAudiences audiences;
     private final ConcurrentHashMap<UUID, BossBar> bossbars = new ConcurrentHashMap<>();
     private BukkitTask task;
 
     public QueueBossbarService(Plugin plugin, CoordinationBackend backend,
-            MessageService messageService) {
+            MessageService messageService, BukkitAudiences audiences) {
         this.plugin = plugin;
         this.backend = backend;
         this.messageService = messageService;
+        this.audiences = audiences;
+    }
+
+    private void hide(UUID uuid, BossBar bar) {
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null) {
+            audiences.player(p).hideBossBar(bar);
+        }
     }
 
     public void start() {
@@ -53,14 +60,12 @@ public final class QueueBossbarService implements Listener {
             task.cancel();
             task = null;
         }
-        for (BossBar bar : bossbars.values())
-            bar.removeAll();
+        bossbars.forEach(this::hide);
         bossbars.clear();
     }
 
     private void tick() {
         Set<UUID> stillQueued = new HashSet<>();
-        // features.queue-bossbar: false hides every bar (removed below).
         boolean enabled = plugin.getConfig().getBoolean("features.queue-bossbar", true);
         for (Player p : enabled ? Bukkit.getOnlinePlayers() : java.util.List.<Player>of()) {
             QueueEntry entry = backend.queueEntryOf(p.getUniqueId()).orElse(null);
@@ -74,10 +79,9 @@ public final class QueueBossbarService implements Listener {
             updateBossbar(p, gameId.value(), position + 1, total);
             stillQueued.add(p.getUniqueId());
         }
-        // Remove bossbars for players no longer in any queue
         bossbars.entrySet().removeIf(e -> {
             if (!stillQueued.contains(e.getKey())) {
-                e.getValue().removeAll();
+                hide(e.getKey(), e.getValue());
                 return true;
             }
             return false;
@@ -86,8 +90,9 @@ public final class QueueBossbarService implements Listener {
 
     private void updateBossbar(Player player, String gameId, int position, int total) {
         BossBar bar = bossbars.computeIfAbsent(player.getUniqueId(), uuid -> {
-            BossBar created = Bukkit.createBossBar(" ", BarColor.BLUE, BarStyle.SOLID);
-            created.addPlayer(player);
+            BossBar created = BossBar.bossBar(net.kyori.adventure.text.Component.space(), 1f,
+                    BossBar.Color.BLUE, BossBar.Overlay.PROGRESS);
+            audiences.player(player).showBossBar(created);
             return created;
         });
         String locale = messageService.resolveLocale(player);
@@ -95,16 +100,13 @@ public final class QueueBossbarService implements Listener {
                 "game", gameId,
                 "position", String.valueOf(position),
                 "total", String.valueOf(total)));
-        bar.setTitle(title);
-        // Progress: 1.0 when you're #1, tapers as you're further back.
+        bar.name(LegacyComponentSerializer.legacySection().deserialize(title));
         double progress = total <= 1 ? 1.0 : Math.max(0.05, 1.0 - ((double) (position - 1) / total));
-        bar.setProgress(progress);
+        bar.progress((float) progress);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        BossBar bar = bossbars.remove(event.getPlayer().getUniqueId());
-        if (bar != null)
-            bar.removeAll();
+        bossbars.remove(event.getPlayer().getUniqueId());
     }
 }

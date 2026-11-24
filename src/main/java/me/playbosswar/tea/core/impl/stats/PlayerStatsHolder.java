@@ -4,11 +4,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Marker holder so the click listener can identify the {@code /stats} GUI
- * (vs. some other inventory) and disable shift-click / drag interactions
- * inside it.
- */
 public final class PlayerStatsHolder implements InventoryHolder {
 
     private Inventory inventory;

@@ -9,16 +9,10 @@ import me.playbosswar.tea.core.api.game.GameRegistry;
 import me.playbosswar.tea.core.api.map.SpawnPoint;
 import me.playbosswar.tea.core.api.message.MessageService;
 import org.bukkit.Bukkit;
-import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
-/**
- * Ticks every second. Drives arena state transitions based on time and player
- * count,
- * and pushes arenas from WAITING through to RELEASED if their game ends.
- */
 public final class LifecycleTicker {
 
     private final Plugin plugin;
@@ -33,6 +27,13 @@ public final class LifecycleTicker {
         this.arenaManager = arenaManager;
         this.gameRegistry = gameRegistry;
         this.messageService = messageService;
+    }
+
+    /** Holds an arena at the end of its countdown while this returns true (map voting switching maps). */
+    private java.util.function.Predicate<ArenaImpl> holdBeforeStart = a -> false;
+
+    public void setHoldBeforeStart(java.util.function.Predicate<ArenaImpl> hold) {
+        this.holdBeforeStart = hold;
     }
 
     public void start() {
@@ -85,6 +86,9 @@ public final class LifecycleTicker {
         }
         int remaining = arena.phaseSecondsRemaining();
         if (remaining <= 0) {
+            if (holdBeforeStart.test(arena)) {
+                return;
+            }
             broadcastCountdownGo(arena);
             arenaManager.transition(arena, ArenaState.STARTING, def.lifecycle().startingSeconds());
             applyStarting(arena);
@@ -107,13 +111,12 @@ public final class LifecycleTicker {
                         placeholders, 0, 25, 5);
                 if (plingTick) {
                     float pitch = 1.0f + (6 - secondsRemaining) * 0.1f;
-                    p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, pitch);
+                    me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().sounds().play(p, "BLOCK_NOTE_BLOCK_PLING", 0.8f, pitch);
                 }
             }
             return;
         }
-        // Above the title threshold: emit a chat announcement only on the configured
-        // second marks.
+        // Above the title threshold, announce in chat only on the configured seconds.
         if (def.lifecycle().chatAnnounceAtSeconds().contains(secondsRemaining)) {
             for (UUID uuid : arena.players()) {
                 Player p = Bukkit.getPlayer(uuid);
@@ -132,7 +135,7 @@ public final class LifecycleTicker {
                 continue;
             messageService.showTitle(p, "core.countdown.go.title", "core.countdown.go.subtitle",
                     0, 30, 10);
-            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 2.0f);
+            me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().sounds().play(p, "BLOCK_NOTE_BLOCK_PLING", 1.0f, 2.0f);
         }
     }
 
@@ -158,7 +161,7 @@ public final class LifecycleTicker {
     private void tickLive(ArenaImpl arena, GameDefinition def) {
         int remaining = arena.phaseSecondsRemaining();
         if (remaining < 0)
-            return; // no timer configured
+            return;
         if (remaining == 0) {
             // Fire once, then mark as fired by flipping to -1. Games decide the winner.
             arena.setPhaseSecondsRemaining(-1);

@@ -8,10 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.messaging.Messenger;
 
-/**
- * Writes {@code Connect <server>} messages on the legacy {@code BungeeCord}
- * channel.
- */
+/** Uses the legacy {@code BungeeCord} channel name. */
 public final class BungeeChannelTransport implements ProxyTransport {
 
     public static final String CHANNEL = "BungeeCord";

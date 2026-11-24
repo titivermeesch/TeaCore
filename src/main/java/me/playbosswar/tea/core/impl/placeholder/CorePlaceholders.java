@@ -15,12 +15,6 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * TeaCore's built-in placeholders: player identity, economy, core stats
- * (wins/deaths/etc. plus derived win-rate and KDR), the player's current arena
- * and queue, their team, and a few fleet-level counts. Reached as
- * {@code %tea_<key>%} when no game namespace claims the key.
- */
 public final class CorePlaceholders implements PlaceholderResolver {
 
     private final TeaCoreAPI api;
@@ -60,9 +54,34 @@ public final class CorePlaceholders implements PlaceholderResolver {
                         yield game;
                     }
                 }
+                if (player != null && (key.startsWith("rating_") || key.startsWith("rank_"))) {
+                    yield ranked(player, key);
+                }
                 yield player == null ? null : resolvePlayer(player, key);
             }
         };
+    }
+
+    /** {@code rating_<game>} and {@code rank_<game>}; never waits on the database. */
+    @Nullable
+    private String ranked(OfflinePlayer player, String key) {
+        var ratings = api instanceof me.playbosswar.tea.core.impl.TeaCorePlugin tc ? tc.ratings() : null;
+        if (ratings == null) {
+            return null;
+        }
+        boolean rating = key.startsWith("rating_");
+        String gameId = key.substring(rating ? 7 : 5);
+        me.playbosswar.tea.core.api.game.GameId game;
+        try {
+            game = me.playbosswar.tea.core.api.game.GameId.of(gameId);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        if (rating) {
+            return String.valueOf(ratings.get(player.getUniqueId(), game).rating());
+        }
+        int rank = ratings.rankCached(player.getUniqueId(), game);
+        return rank > 0 ? String.valueOf(rank) : "-";
     }
 
     /**
@@ -158,8 +177,7 @@ public final class CorePlaceholders implements PlaceholderResolver {
                     .mapToLong(def -> unlocked(uuid, def.id())).sum());
             default -> {
                 if (key.startsWith("arena_")) {
-                    // Every sidebar value, e.g. arena_time (m:ss), arena_phase,
-                    // arena_waiting_for, arena_map_name, arena_winner.
+                    // arena_<tag>: any sidebar value, e.g. arena_time (m:ss) or arena_winner.
                     String tag = key.substring(6).replace('_', '-');
                     yield current(player, tag.equals("map-name") ? "map" : tag.equals("game-name") ? "game-name" : tag);
                 }
@@ -170,18 +188,17 @@ public final class CorePlaceholders implements PlaceholderResolver {
                     yield kitsUnlocked(uuid, key.substring(14));
                 }
                 if (key.startsWith("achievements_unlocked_")) {
-                    yield gameId(key.substring(22)).map(g -> String.valueOf(unlocked(uuid, g))).orElse(null);
+                    yield anyGameId(key.substring(22)).map(g -> String.valueOf(unlocked(uuid, g))).orElse(null);
                 }
                 if (key.startsWith("achievements_total_")) {
-                    yield gameId(key.substring(19))
-                            .map(g -> String.valueOf(api.achievements().forGame(g).size())).orElse(null);
+                    yield anyGameId(key.substring(19))
+                            .map(g -> String.valueOf(achievementIds(g).size())).orElse(null);
                 }
                 yield null;
             }
         };
     }
 
-    /** A value from the player's current arena (same values as sidebar tags), or "". */
     private String current(OfflinePlayer player, String tag) {
         Player online = player.getPlayer();
         Arena arena = online == null ? null : api.arenas().arenaOf(online.getUniqueId()).orElse(null);
@@ -196,8 +213,25 @@ public final class CorePlaceholders implements PlaceholderResolver {
     }
 
     private long unlocked(UUID uuid, me.playbosswar.tea.core.api.game.GameId game) {
+        return achievementIds(game).stream()
+                .filter(id -> api.achievements().isUnlocked(uuid, game, id)).count();
+    }
+
+    /** Also matches games this server doesn't run (their achievements are stored). */
+    private java.util.Optional<me.playbosswar.tea.core.api.game.GameId> anyGameId(String id) {
+        try {
+            return java.util.Optional.of(me.playbosswar.tea.core.api.game.GameId.of(id));
+        } catch (IllegalArgumentException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    private java.util.List<String> achievementIds(me.playbosswar.tea.core.api.game.GameId game) {
+        if (api.achievements() instanceof me.playbosswar.tea.core.impl.achievement.AchievementServiceImpl impl) {
+            return impl.ids(game);
+        }
         return api.achievements().forGame(game).stream()
-                .filter(a -> api.achievements().isUnlocked(uuid, game, a.id())).count();
+                .map(me.playbosswar.tea.core.api.achievement.AchievementDefinition::id).toList();
     }
 
     @Nullable

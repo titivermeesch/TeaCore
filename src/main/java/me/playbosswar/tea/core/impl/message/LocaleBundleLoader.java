@@ -21,20 +21,9 @@ public final class LocaleBundleLoader {
     }
 
     /**
-     * Loads a locale bundle by merging the plugin jar defaults with any admin
-     * overrides on disk.
-     * On-disk values win for keys that exist in both; jar keys that are missing on
-     * disk are still
-     * returned so newly-added keys work immediately without requiring admins to
-     * delete their
-     * customized lang file.
-     *
-     * <p>
-     * Additionally, any keys that exist in the jar but are missing from the on-disk
-     * file are
-     * written back to disk so admins can discover + customize them. Keys that
-     * already exist on
-     * disk are never overwritten - admin customizations are preserved.
+     * Disk values win over jar defaults. Jar keys missing on disk are still returned
+     * and written back to disk so admins can find them; existing disk keys are never
+     * overwritten.
      */
     public static LocaleBundle load(Plugin plugin, Path dataFolder, String locale) {
         Map<String, Object> jarRaw = new LinkedHashMap<>();
@@ -61,8 +50,7 @@ public final class LocaleBundleLoader {
             flatten(diskYaml, "", diskRaw);
         }
 
-        // Sync missing jar keys back to disk so admins see them alongside their edits.
-        // Preserve list-shaped values so multiline lore renders correctly even on disk.
+        // Keep list values as lists so multiline lore stays a YAML list on disk.
         if (diskYaml != null && jarYaml != null) {
             int added = 0;
             for (Map.Entry<String, Object> e : jarRaw.entrySet()) {
@@ -92,11 +80,7 @@ public final class LocaleBundleLoader {
         return new LocaleBundle(locale, merged);
     }
 
-    /**
-     * Walks the YAML tree and records leaf values verbatim. Lists are kept as
-     * {@code List<?>} so the writeback path can preserve their YAML shape; the
-     * bundle-builder above flattens them into a single newline-joined string.
-     */
+    /** Lists stay {@code List<?>} so the writeback keeps their YAML shape. */
     private static void flatten(ConfigurationSection section, String prefix, Map<String, Object> out) {
         for (String key : section.getKeys(false)) {
             String path = prefix.isEmpty() ? key : prefix + "." + key;

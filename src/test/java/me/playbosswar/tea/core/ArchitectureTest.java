@@ -7,11 +7,7 @@ import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
-/**
- * Enforces the api/impl package boundary inside the {@code core} module:
- * classes under {@code api} must never depend on {@code impl}, so external
- * consumers can compile against {@code api} alone without pulling internals.
- */
+/** api must never depend on impl, so consumers can compile against api alone. */
 @AnalyzeClasses(
         packages = "me.playbosswar.tea.core",
         importOptions = ImportOption.DoNotIncludeTests.class)

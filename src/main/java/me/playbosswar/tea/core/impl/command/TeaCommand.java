@@ -21,7 +21,7 @@ import org.bukkit.entity.Player;
 public final class TeaCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> TOP_LEVEL = List.of(
-            "reload", "version", "help", "arena", "game", "map", "stats", "lobby");
+            "reload", "version", "help", "admin", "dashboard", "arena", "game", "map", "stats", "lobby", "waiting");
 
     private static final List<String> ARENA_SUBS = List.of(
             "list", "allocate", "join", "spectate", "observe", "leave", "release", "start");
@@ -44,11 +44,14 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
             case "help" -> showHelp(sender);
             case "reload" -> handleReload(sender);
             case "version" -> handleVersion(sender);
+            case "admin" -> handleAdmin(sender);
+            case "dashboard" -> handleDashboard(sender, args);
             case "arena" -> handleArena(sender, args);
             case "game" -> handleGame(sender, args);
             case "map" -> mapCommand.handle(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
             case "stats" -> handleStats(sender, args);
             case "lobby" -> handleLobby(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
+            case "waiting" -> handleWaiting(sender, args);
             default -> plugin.messageService().sendToSender(sender, "core.command.unknown");
         }
         return true;
@@ -58,6 +61,9 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             return filter(TOP_LEVEL, args[0]);
+        }
+        if (args.length == 2 && "dashboard".equalsIgnoreCase(args[0])) {
+            return filter(List.of("login"), args[1]);
         }
         if (args.length == 2 && "arena".equalsIgnoreCase(args[0])) {
             return filter(ARENA_SUBS, args[1]);
@@ -84,12 +90,113 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         if ("map".equalsIgnoreCase(args[0])) {
             return mapCommand.complete(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         }
+        if (args.length == 2 && "waiting".equalsIgnoreCase(args[0])) {
+            return filter(List.of("set", "clear", "show", "room"), args[1]);
+        }
+        if (args.length >= 3 && "waiting".equalsIgnoreCase(args[0]) && "room".equalsIgnoreCase(args[1])) {
+            var rooms = ((me.playbosswar.tea.core.impl.arena.ArenaManagerImpl) plugin.arenas()).waitingRooms();
+            List<String> roomIds = rooms.all().stream().map(r -> r.id()).toList();
+            List<String> games = plugin.games().all().stream().map(d -> d.id().value()).toList();
+            if (args.length == 3) {
+                return filter(List.of("edit", "pos1", "pos2", "spawn", "save", "discard", "assign", "unassign",
+                        "list", "delete"), args[2]);
+            }
+            String sub = args[2].toLowerCase(Locale.ROOT);
+            if (args.length == 4 && (sub.equals("edit") || sub.equals("delete") || sub.equals("assign"))) {
+                return filter(roomIds, args[3]);
+            }
+            if ((args.length == 5 && sub.equals("assign")) || (args.length == 4 && sub.equals("unassign"))) {
+                return filter(games, args[args.length - 1]);
+            }
+            if ((args.length == 6 && sub.equals("assign")) || (args.length == 5 && sub.equals("unassign"))) {
+                try {
+                    GameId g = GameId.of(args[args.length - 2]);
+                    return filter(plugin.maps().forGame(g).stream().map(m -> m.mapId()).toList(), args[args.length - 1]);
+                } catch (Exception ignored) {
+                    return List.of();
+                }
+            }
+            return List.of();
+        }
+        if (args.length == 3 && "waiting".equalsIgnoreCase(args[0])) {
+            List<String> keys = new java.util.ArrayList<>(List.of("default"));
+            plugin.games().all().forEach(d -> keys.add(d.id().value()));
+            return filter(keys, args[2]);
+        }
         if ("lobby".equalsIgnoreCase(args[0])) {
             var lobby = plugin.lobbyAdminCommand();
             if (lobby == null) return List.of();
             return lobby.complete(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
         }
         return List.of();
+    }
+
+    private void handleAdmin(CommandSender sender) {
+        if (!(sender instanceof org.bukkit.entity.Player player)) {
+            plugin.messageService().sendToSender(sender, "core.command.player-only");
+            return;
+        }
+        if (!sender.hasPermission("tea.arena.admin")) {
+            plugin.messageService().sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        if (!plugin.menus().open(player, "admin", Map.of())) {
+            plugin.messageService().send(player, "core.arena.admin.menu-disabled");
+        }
+    }
+
+    private void handleDashboard(CommandSender sender, String[] args) {
+        if (args.length < 2 || !args[1].equalsIgnoreCase("login")) {
+            plugin.messageService().sendToSender(sender, "core.dashboard.usage");
+            return;
+        }
+        dashboardLogin(sender);
+    }
+
+    public void dashboardLogin(CommandSender sender) {
+        if (!(sender instanceof org.bukkit.entity.Player player)) {
+            plugin.messageService().sendToSender(sender, "core.command.player-only");
+            return;
+        }
+        if (!player.hasPermission(me.playbosswar.tea.core.impl.dashboard.auth.DashboardPermission.VIEW)) {
+            plugin.messageService().send(player, "core.command.no-permission");
+            return;
+        }
+        var codes = plugin.dashboardLoginCodes();
+        String code = codes.newCode();
+        java.util.List<String> perms = me.playbosswar.tea.core.impl.dashboard.auth.LoginCodes.granted(player::hasPermission);
+        java.util.UUID uuid = player.getUniqueId();
+        String name = player.getName();
+        String url = plugin.dashboardConfig().publicUrl();
+        org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            boolean ok;
+            try {
+                codes.store(code, uuid, name, perms);
+                ok = true;
+            } catch (RuntimeException e) {
+                ok = false;
+            }
+            boolean stored = ok;
+            org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline()) {
+                    return;
+                }
+                if (!stored) {
+                    plugin.messageService().send(player, "core.dashboard.login.failed");
+                    return;
+                }
+                if (url.isEmpty()) {
+                    plugin.messageService().send(player, "core.dashboard.login.code", Map.of("code", code));
+                    return;
+                }
+                String link = url + "/login?code=" + code;
+                String label = plugin.messageService().renderPlainText(
+                        plugin.messageService().resolveLocale(player), "core.dashboard.login.link-label", Map.of());
+                plugin.messageService().send(player, "core.dashboard.login.link", Map.of("code", code));
+                plugin.messageService().sendRaw(player, "<click:open_url:'" + link + "'><accent><u>" + label
+                        + "</u></accent></click>");
+            });
+        });
     }
 
     private void handleReload(CommandSender sender) {
@@ -147,8 +254,6 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         MessageService ms = plugin.messageService();
         ms.sendToSender(sender, "core.arena.list.header");
         int shown = 0;
-        // Fleet-wide view via the coordination backend; local-only view if someone
-        // prefers `/tea arena list local` could be a future enhancement.
         for (var snap : plugin.coordination().allArenas()) {
             ms.sendToSender(sender, "core.arena.list.entry", Map.of(
                     "id", snap.arenaId().value().toString().substring(0, 8),
@@ -189,11 +294,20 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
     }
 
     private void arenaJoin(CommandSender sender, String[] args, boolean spectator) {
-        if (!(sender instanceof Player player)) {
+        Player player;
+        if (args.length >= 4 && (!(sender instanceof Player) || sender.hasPermission("tea.arena.admin"))) {
+            player = org.bukkit.Bukkit.getPlayerExact(args[3]);
+            if (player == null) {
+                plugin.messageService().sendToSender(sender, "core.command.player-not-found", Map.of("player", args[3]));
+                return;
+            }
+        } else if (sender instanceof Player self) {
+            player = self;
+        } else {
             plugin.messageService().sendToSender(sender, "core.command.player-only");
             return;
         }
-        if (!sender.hasPermission("tea.arena.play")) {
+        if (!player.hasPermission("tea.arena.play")) {
             plugin.messageService().sendToSender(sender, "core.command.no-permission");
             return;
         }
@@ -328,7 +442,6 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         UUID targetUuid;
         String targetName;
         if (args.length >= 2) {
-            // Looking up someone else requires admin.
             if (!sender.hasPermission("tea.admin")) {
                 ms.sendToSender(sender, "core.command.no-permission");
                 return;
@@ -346,9 +459,8 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
 
         ms.sendToSender(sender, "core.stats.header", Map.of("player", targetName));
         int shown = 0;
-        // Iterate persisted schemas so a lobby (which has no in-process providers)
-        // still shows every game in the fleet. providerFor falls back to a generic
-        // DB-backed provider when no native one is registered locally.
+        // Iterate persisted schemas so a lobby without in-process providers still shows
+        // every game in the fleet.
         for (var schema : plugin.stats().allSchemas()) {
             Map<String, String> entries = plugin.stats().providerFor(schema).fetch(targetUuid);
             if (entries == null || entries.isEmpty())
@@ -365,6 +477,135 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleWaiting(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.arena.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        String action = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "show";
+        if (action.equals("room")) {
+            handleWaitingRoom(sender, java.util.Arrays.copyOfRange(args, 2, args.length));
+            return;
+        }
+        String key = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "default";
+        var areas = ((me.playbosswar.tea.core.impl.arena.ArenaManagerImpl) plugin.arenas()).waitingAreas();
+        switch (action) {
+            case "set" -> {
+                if (!(sender instanceof org.bukkit.entity.Player player)) {
+                    ms.sendToSender(sender, "core.command.player-only");
+                    return;
+                }
+                areas.set(key, player.getLocation());
+                ms.sendToSender(sender, "core.waiting-area.set", Map.of("key", key,
+                        "world", player.getWorld().getName()));
+            }
+            case "clear" -> ms.sendToSender(sender, areas.clear(key) ? "core.waiting-area.cleared"
+                    : "core.waiting-area.none", Map.of("key", key));
+            default -> {
+                var at = key.equals("default")
+                        ? plugin.getConfig().getConfigurationSection("waiting-area.default")
+                        : plugin.getConfig().getConfigurationSection("waiting-area." + key);
+                if (at == null) {
+                    ms.sendToSender(sender, "core.waiting-area.none", Map.of("key", key));
+                } else {
+                    ms.sendToSender(sender, "core.waiting-area.show", Map.of("key", key,
+                            "world", String.valueOf(at.getString("world")),
+                            "x", String.valueOf(at.getDouble("x")), "y", String.valueOf(at.getDouble("y")),
+                            "z", String.valueOf(at.getDouble("z"))));
+                }
+            }
+        }
+    }
+
+    private void handleWaitingRoom(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        var rooms = ((me.playbosswar.tea.core.impl.arena.ArenaManagerImpl) plugin.arenas()).waitingRooms();
+        String sub = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "help";
+        org.bukkit.entity.Player player = sender instanceof org.bukkit.entity.Player p ? p : null;
+        try {
+            switch (sub) {
+                case "edit", "create" -> {
+                    if (player == null) { ms.sendToSender(sender, "core.command.player-only"); return; }
+                    if (args.length < 2) { ms.sendToSender(sender, "core.waiting-room.usage"); return; }
+                    if (plugin.arenas().arenaOf(player.getUniqueId()).isPresent()) {
+                        ms.send(player, "core.map.leave-arena-first");
+                        return;
+                    }
+                    String id = args[1].toLowerCase(Locale.ROOT);
+                    boolean exists = rooms.get(id).isPresent();
+                    rooms.edit(player, id);
+                    ms.send(player, exists ? "core.waiting-room.editing" : "core.waiting-room.creating", Map.of("room", id));
+                }
+                case "pos1", "pos2" -> {
+                    if (player == null) { ms.sendToSender(sender, "core.command.player-only"); return; }
+                    rooms.setPos(player, sub.equals("pos1") ? 1 : 2);
+                    ms.send(player, "core.waiting-room.pos-set", Map.of("which", sub));
+                }
+                case "spawn" -> {
+                    if (player == null) { ms.sendToSender(sender, "core.command.player-only"); return; }
+                    rooms.setSpawn(player);
+                    ms.send(player, "core.waiting-room.spawn-set");
+                }
+                case "save" -> {
+                    if (player == null) { ms.sendToSender(sender, "core.command.player-only"); return; }
+                    var room = rooms.save(player);
+                    ms.send(player, "core.waiting-room.saved", Map.of("room", room.id(),
+                            "size", room.size()[0] + "x" + room.size()[1] + "x" + room.size()[2]));
+                }
+                case "discard" -> {
+                    if (player == null) { ms.sendToSender(sender, "core.command.player-only"); return; }
+                    rooms.discard(player);
+                    ms.send(player, "core.waiting-room.discarded");
+                }
+                case "assign", "unassign" -> {
+                    boolean assign = sub.equals("assign");
+                    int need = assign ? 3 : 2;
+                    if (args.length < need) { ms.sendToSender(sender, "core.waiting-room.usage"); return; }
+                    String room = assign ? args[1].toLowerCase(Locale.ROOT) : null;
+                    String game = args[assign ? 2 : 1].toLowerCase(Locale.ROOT);
+                    String map = args.length > need ? args[need].toLowerCase(Locale.ROOT) : null;
+                    if (room != null && rooms.get(room).isEmpty()) {
+                        ms.sendToSender(sender, "core.waiting-room.unknown", Map.of("room", room));
+                        return;
+                    }
+                    rooms.assign(GameId.of(game), map, room);
+                    String target = map == null ? game : game + "/" + map;
+                    ms.sendToSender(sender, assign ? "core.waiting-room.assigned" : "core.waiting-room.unassigned",
+                            Map.of("room", room == null ? "" : room, "target", target));
+                }
+                case "delete" -> {
+                    if (args.length < 2) { ms.sendToSender(sender, "core.waiting-room.usage"); return; }
+                    String id = args[1].toLowerCase(Locale.ROOT);
+                    ms.sendToSender(sender, rooms.delete(id) ? "core.waiting-room.deleted" : "core.waiting-room.unknown",
+                            Map.of("room", id));
+                }
+                case "list" -> {
+                    if (rooms.all().isEmpty()) {
+                        ms.sendToSender(sender, "core.waiting-room.none");
+                        return;
+                    }
+                    for (var room : rooms.all()) {
+                        java.util.List<String> used = new java.util.ArrayList<>();
+                        rooms.gameAssignments().forEach((g, r) -> { if (r.equals(room.id())) used.add(g); });
+                        rooms.mapAssignments().forEach((g, m) -> m.forEach((map, r) -> {
+                            if (r.equals(room.id())) used.add(g + "/" + map);
+                        }));
+                        ms.sendToSender(sender, "core.waiting-room.list-entry", Map.of("room", room.id(),
+                                "size", room.size()[0] + "x" + room.size()[1] + "x" + room.size()[2],
+                                "used", used.isEmpty() ? "-" : String.join(", ", used)));
+                    }
+                }
+                default -> ms.sendToSender(sender, "core.waiting-room.usage");
+            }
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            ms.sendToSender(sender, "core.waiting-room.failed", Map.of("reason", String.valueOf(e.getMessage())));
+        } catch (java.io.IOException e) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Waiting room command failed", e);
+            ms.sendToSender(sender, "core.waiting-room.failed", Map.of("reason", String.valueOf(e.getMessage())));
+        }
+    }
+
     private void handleLobby(CommandSender sender, String[] args) {
         var lobby = plugin.lobbyAdminCommand();
         if (lobby == null) {
@@ -378,10 +619,8 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         MessageService ms = plugin.messageService();
         if (args.length < 2 || "list".equalsIgnoreCase(args[1])) {
             ms.sendToSender(sender, "core.game.list.header");
-            // Walk every game id the fleet has published as hosted, not just
-            // ones registered on this server's local GameRegistry. The lobby
-            // doesn't load the game plugins itself, but we still want
-            // /tea game list to surface the games admins can /play to.
+            // Use every game the fleet publishes as hosted: the lobby loads no game plugins
+            // but /tea game list should still show the games admins can /play to.
             java.util.LinkedHashSet<me.playbosswar.tea.core.api.game.GameId> ids =
                     new java.util.LinkedHashSet<>();
             for (GameDefinition def : plugin.games().all())
@@ -411,6 +650,8 @@ public final class TeaCommand implements CommandExecutor, TabCompleter {
         ms.sendToSender(sender, "core.help.header");
         ms.sendToSender(sender, "core.help.reload");
         ms.sendToSender(sender, "core.help.version");
+        ms.sendToSender(sender, "core.help.admin");
+        ms.sendToSender(sender, "core.help.dashboard");
         ms.sendToSender(sender, "core.help.arena");
         ms.sendToSender(sender, "core.help.game");
         ms.sendToSender(sender, "core.help.map");

@@ -6,56 +6,44 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 /**
- * Inventory menus defined in YAML.
+ * Inventory menus defined in YAML: a layout pattern, fixed items, and list
+ * areas a {@link MenuSource} fills with one item per entry, paged
+ * automatically. Clicks run {@link MenuAction}s such as {@code close},
+ * {@code back}, {@code open-menu:<id> key=value}, {@code command:<cmd>} or
+ * game-registered ones.
  *
- * <p>
- * A menu file describes the layout (title, rows, a character pattern), fixed
- * items, and list areas that a {@link MenuSource} fills with one item per entry
- * (games, maps, kits, shop items, ...), paged automatically. Clicks run
- * {@link MenuAction}s such as {@code close}, {@code back},
- * {@code open-menu:<id> key=value}, {@code command:<cmd>} or anything a game
- * registers. TeaCore's own menus live in {@code plugins/TeaCore/menus/}; a game
- * ships its menus in its jar and registers them with {@link #registerMenu}, after
- * which admins edit the copy in the game's data folder.
- *
- * <p>
- * Menus can be turned off server-wide ({@code features.menus}), per game
+ * <p>Menus can be turned off server-wide ({@code features.menus}), per game
  * ({@code features.games.<id>.menus}) and per file ({@code enabled: false}).
  */
 public interface MenuService {
 
     /**
-     * Loads (and on first run extracts) a menu file shipped in {@code owner}'s jar.
-     * The menu id is {@code <owner name lower-case>:<file name without .yml>}
-     * unless the file lives in TeaCore, where it is just the file name.
+     * Loads a menu file from {@code owner}'s jar, extracting it to the data
+     * folder on first run so admins can edit it. The id is
+     * {@code <owner name lower-case>:<file name without .yml>}, or just the file
+     * name for TeaCore's own menus.
      *
-     * @param owner        the plugin that ships the file.
-     * @param resourcePath path inside the jar, e.g. {@code menus/shop.yml}.
-     * @return the menu id it was registered under.
+     * @param resourcePath e.g. {@code menus/shop.yml}
+     * @return the registered menu id
      */
     String registerMenu(Plugin owner, String resourcePath);
 
-    /** Registers a list source under {@code id} (namespace games ids, e.g. {@code fireball:shop}). */
+    /** Namespace ids with the game id, e.g. {@code fireball:shop}. */
     void registerSource(String id, MenuSource source);
 
-    /** Registers a click action under {@code id} (e.g. {@code fireball:buy}). */
+    /** Namespace ids with the game id, e.g. {@code fireball:buy}. */
     void registerAction(String id, MenuAction action);
 
     /**
-     * Opens a menu.
-     *
-     * @param args values available to the menu as {@code {key}} placeholders and
-     *             passed to its sources (e.g. {@code game=fireball}).
-     * @return {@code false} if the menu is unknown or turned off.
+     * @param args available as {@code {key}} placeholders and passed to sources (e.g. {@code game=fireball})
+     * @return {@code false} if the menu is unknown or turned off
      */
     boolean open(Player player, String menuId, Map<String, String> args);
 
-    /** Whether a menu exists and is turned on. */
     boolean isEnabled(String menuId);
 
-    /** Ids of every loaded menu. */
     Set<String> menuIds();
 
-    /** Re-reads every menu file (also done on {@code /tea reload}). */
+    /** Re-reads every menu file. Also runs on {@code /tea reload}. */
     void reload();
 }

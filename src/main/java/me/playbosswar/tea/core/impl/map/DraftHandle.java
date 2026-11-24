@@ -4,10 +4,6 @@ import java.util.Optional;
 import me.playbosswar.tea.core.api.map.MapDraftHandle;
 import me.playbosswar.tea.core.api.map.MapExtensionKey;
 
-/**
- * Concrete {@link MapDraftHandle} that reads/writes the extension identified by
- * a key on an in-flight {@link MapDraft}.
- */
 public final class DraftHandle<T> implements MapDraftHandle<T> {
 
     private final MapDraft draft;

@@ -4,13 +4,8 @@ import org.bukkit.Location;
 import org.bukkit.World;
 
 /**
- * Canonical paste origin for maps in arena worlds. Schematics are saved with
- * their
- * min-corner mapped to this point, and spawn coordinates in
- * {@code MapDefinition}
- * are stored as deltas from this origin. Keep all arena/map code in sync with
- * these
- * constants - if they change, existing maps will teleport to the wrong spot.
+ * Schematics are saved with their min corner at this point and spawns are stored as
+ * deltas from it. Changing these constants moves every existing map.
  */
 public final class MapOrigin {
 

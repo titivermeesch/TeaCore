@@ -17,17 +17,10 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 /**
- * Reads and writes per-game map YAML files. Layout:
- *
  * <pre>{@code
  *   plugins/TeaCore/maps/<gameId>.yml
  *   plugins/TeaCore/maps/schems/<filename>.schem
  * }</pre>
- *
- * Spawn coordinates are stored as absolute world coordinates captured from the
- * admin's location at authoring time. When pasting a schematic into an arena,
- * the admin is responsible for building at (0, 64, 0) so the spawns line up -
- * see the doc milestone for the authoring workflow.
  */
 public final class MapPersistence {
 
@@ -99,6 +92,14 @@ public final class MapPersistence {
 
             String schematicName = mapSection.getString("schematic-file");
             Path schematicPath = schematicName == null ? null : schematicsDir.resolve(schematicName);
+            if (schematicPath != null) {
+                // Maps can ship both formats (map.schem + map.schematic); use the one this server reads.
+                String base = schematicName.replaceFirst("\\.[^.]+$", "");
+                Path native_ = schematicsDir.resolve(base + "." + SchematicStore.current().extension());
+                if (Files.isRegularFile(native_)) {
+                    schematicPath = native_;
+                }
+            }
 
             SpawnPoint waiting = readSpawn(mapSection.getConfigurationSection("waiting-spawn"), "waiting");
 

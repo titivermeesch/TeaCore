@@ -21,11 +21,6 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 
-/**
- * Dispatches Bukkit events to registered abilities whose kit the player has
- * selected.
- * Abilities are only triggered in arenas in {@link ArenaState#LIVE} state.
- */
 public final class AbilityTriggerListener implements Listener {
 
     private final KitRegistryImpl kitRegistry;

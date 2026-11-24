@@ -28,11 +28,7 @@ public final class PlaceholderServiceImpl implements PlaceholderService {
         namespaced.remove(namespace.toLowerCase());
     }
 
-    /**
-     * Registers a resolver with no namespace, consulted (in registration order)
-     * for any {@code params} no namespaced resolver handled. TeaCore's own
-     * built-ins register here; not part of the public API.
-     */
+    /** Fallback resolver with no namespace, tried in registration order. Not public API. */
     public void registerGlobal(PlaceholderResolver resolver) {
         global.add(resolver);
     }

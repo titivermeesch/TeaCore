@@ -14,13 +14,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 public final class ConfigLoader {
 
-    /**
-     * Known config keys. Anything outside this set generates a startup warning so
-     * typos
-     * don't silently fall through to defaults. Keep this in sync with the default
-     * config.yml
-     * and {@link CoreConfig}.
-     */
+    // Unknown keys log a startup warning so typos don't silently fall back to defaults.
+    // Keep in sync with the default config.yml and CoreConfig.
     private static final Set<String> KNOWN_KEYS = Set.of(
             "network",
             "network.mode",
@@ -48,13 +43,17 @@ public final class ConfigLoader {
             "dashboard.bind-address",
             "dashboard.port",
             "dashboard.admin-token",
+            "dashboard.public-url",
             "arena-pool",
             "arena-pool.mode",
+            "arena-pool.spare-worlds",
+            "arena-pool.scale-down-idle-seconds",
             "arena-pool.games",
             "map-setup-scoreboard",
             "map-setup-scoreboard.enabled",
             "lobby",
             "lobby.enabled",
+            "lobby.pvp",
             "lobby.manage-spawn",
             "lobby.gamemode",
             "lobby.spawn",
@@ -74,10 +73,55 @@ public final class ConfigLoader {
             "features.queue-bossbar",
             "features.lobby-hotbar",
             "features.match-history",
+            "features.map-editor-tools",
+            "features.spectator-tools",
+            "features.map-voting",
+            "features.waiting-protection",
+            "features.kit-item",
+            "features.leave-item",
+            "features.ranked",
+            "features.quests",
+            "parties",
+            "parties.enabled",
+            "parties.leader-only",
+            "ranked",
+            "ranked.start-rating",
+            "ranked.k-factor",
+            "ranked.range",
+            "ranked.widen-per-10s",
+            "ranked.max-range",
+            "map-voting",
+            "map-voting.options",
+            "map-voting.hotbar-slot",
+            "kit-item",
+            "kit-item.material",
+            "kit-item.hotbar-slot",
+            "leave-item",
+            "waiting-area",
+            "cloudnet",
+            "leave-item.material",
+            "leave-item.hotbar-slot",
+            "npcs",
             "features.games",
             "combat",
             "combat.kill-credit-window-ms",
             "combat.assist-window-ms",
+            "match-history",
+            "match-history.keep-days",
+            "maps",
+            "maps.keep-versions",
+            "maps.storage",
+            "hosting",
+            "hosting.games",
+            "hosting.map",
+            "hosting.maps",
+            "metrics",
+            "metrics.token",
+            "discord",
+            "discord.match-results", "discord.match-results.url",
+            "discord.staff-actions", "discord.staff-actions.url",
+            "discord.achievements", "discord.achievements.url",
+            "discord.server-status", "discord.server-status.url",
             "leaderboards",
             "leaderboards.refresh-seconds",
             "game-display");
@@ -92,7 +136,9 @@ public final class ConfigLoader {
             for (String key : yaml.getKeys(true)) {
                 // Dynamic sections (per-game pool overrides) aren't in KNOWN_KEYS.
                 if (key.startsWith("arena-pool.games.") || key.startsWith("features.games.")
-                        || key.startsWith("game-display."))
+                        || key.startsWith("game-display.") || key.startsWith("npcs.")
+                        || key.startsWith("waiting-area.") || key.startsWith("cloudnet.")
+                        || key.startsWith("hosting.maps."))
                     continue;
                 if (!KNOWN_KEYS.contains(key)) {
                     logger.warning("Unknown config key '" + key + "' in "
@@ -108,10 +154,8 @@ public final class ConfigLoader {
         String rawServerId = yaml.getString("network.server-id", "auto");
         String serverId = resolveServerId(rawServerId);
         String lobbyServer = yaml.getString("network.lobby-server", "lobby");
-        // Defaults to true: a single-server install needs to be its own
-        // matchmaker. In split central deployments, the operator flips this to
-        // false on every arena backend so the lobby is the only leader-eligible
-        // server and its arena-pool.games config drives sizing for the fleet.
+        // Defaults to true so a single server is its own matchmaker. Central deployments set
+        // it false on arena servers so the lobby's arena-pool.games config sizes the fleet.
         boolean eligibleMatchmaker = yaml.getBoolean("network.eligible-matchmaker", true);
         CoreConfig.NetworkConfig network = new CoreConfig.NetworkConfig(mode, serverId, lobbyServer,
                 eligibleMatchmaker);
@@ -170,8 +214,15 @@ public final class ConfigLoader {
                 }
             }
         }
+        if ("off".equalsIgnoreCase(adminToken.trim())) {
+            adminToken = "";
+        }
+        String publicUrl = dashboardSection.getString("public-url", "").trim();
+        while (publicUrl.endsWith("/")) {
+            publicUrl = publicUrl.substring(0, publicUrl.length() - 1);
+        }
         CoreConfig.DashboardConfig dashboard = new CoreConfig.DashboardConfig(
-                dashEnabled, bindAddress, dashPort, adminToken);
+                dashEnabled, bindAddress, dashPort, adminToken, publicUrl);
 
         CoreConfig.ArenaPoolMode poolMode = parseEnum(
                 yaml.getString("arena-pool.mode", "standalone"),
@@ -201,10 +252,6 @@ public final class ConfigLoader {
         return HexFormat.of().formatHex(bytes);
     }
 
-    /**
-     * Back-compat overload used by older call sites. Prefer the Logger-aware
-     * variant.
-     */
     public static CoreConfig load(Path configFile, Path dataFolder) {
         return load(configFile, dataFolder, null);
     }
@@ -216,6 +263,9 @@ public final class ConfigLoader {
         String env = System.getenv("TEA_SERVER_ID");
         if (env != null && !env.isBlank())
             return env.trim();
+        String cloud = me.playbosswar.tea.core.impl.cloud.CloudPlatform.detectServiceName();
+        if (cloud != null)
+            return cloud;
         return "srv-" + Long.toHexString(System.nanoTime());
     }
 

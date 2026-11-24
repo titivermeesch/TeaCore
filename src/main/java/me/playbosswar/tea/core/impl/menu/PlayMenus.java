@@ -26,15 +26,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Sources and actions behind the play and profile menus.
- *
- * <p>Sources: {@code games}, {@code maps} (arg {@code game}), {@code arenas}
- * (args {@code game}, optional {@code map}), {@code achievements} (optional arg
- * {@code game}), {@code match-history} (optional arg {@code target_uuid}).
- * Actions: {@code play:<game> [map]}, {@code join-arena:<arena id>},
- * {@code spectate:<arena id>}.
- */
 public final class PlayMenus {
 
     private final Plugin plugin;
@@ -70,11 +61,10 @@ public final class PlayMenus {
     }
 
     /**
-     * Joins or spectates an arena by full id. An arena on another server can't be
-     * entered directly from here, so the player queues for its game and map.
+     * An arena on another server can't be entered directly, so the player queues for its game and map.
      */
     private void enter(Player player, String arenaId, boolean spectate) {
-        // Full ids, or the short 8-character form older menu files pass.
+        // Full ids or the short 8-character form.
         ArenaSnapshot match = core.coordination().allArenas().stream()
                 .filter(a -> a.arenaId().value().toString().startsWith(arenaId.toLowerCase(Locale.ROOT)))
                 .findFirst().orElse(null);
@@ -88,8 +78,6 @@ public final class PlayMenus {
         }
         player.performCommand("play " + match.gameId().value() + (match.mapId() == null ? "" : " " + match.mapId()));
     }
-
-    // --- Games ---
 
     /** Local games plus games other servers host (multi-server lobbies). */
     private Set<GameId> allGames() {
@@ -140,8 +128,6 @@ public final class PlayMenus {
         return display.icon(game);
     }
 
-    // --- Maps and arenas ---
-
     private List<MenuEntry> maps(Player viewer, Map<String, String> args) {
         String gameArg = args.get("game");
         if (gameArg == null) {
@@ -161,7 +147,7 @@ public final class PlayMenus {
             v.put("min", String.valueOf(map.minPlayers()));
             v.put("max", String.valueOf(map.maxPlayers()));
             v.put("players", String.valueOf(players));
-            out.add(new MenuEntry(v, new ItemStack(Material.FILLED_MAP)));
+            out.add(new MenuEntry(v, me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().stackOr("FILLED_MAP", "PAPER", 1)));
         }
         return out;
     }
@@ -188,7 +174,7 @@ public final class PlayMenus {
             v.put("server", a.serverId());
             v.put("joinable", String.valueOf((a.state() == ArenaState.WAITING || a.state() == ArenaState.COUNTDOWN)
                     && a.players() < a.maxPlayers()));
-            out.add(new MenuEntry(v, new ItemStack(stateIcon(a.state()))));
+            out.add(new MenuEntry(v, stateIcon(a.state())));
         }
         return out;
     }
@@ -200,16 +186,15 @@ public final class PlayMenus {
         return core.maps().get(a.gameId(), a.mapId()).map(MapDefinition::resolvedDisplayName).orElse(a.mapId());
     }
 
-    private static Material stateIcon(ArenaState state) {
-        return switch (state) {
-            case WAITING -> Material.LIME_WOOL;
-            case COUNTDOWN, STARTING -> Material.YELLOW_WOOL;
-            case LIVE -> Material.RED_WOOL;
-            default -> Material.GRAY_WOOL;
+    private static ItemStack stateIcon(ArenaState state) {
+        String wool = switch (state) {
+            case WAITING -> "LIME_WOOL";
+            case COUNTDOWN, STARTING -> "YELLOW_WOOL";
+            case LIVE -> "RED_WOOL";
+            default -> "GRAY_WOOL";
         };
+        return me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().stackOr(wool, "WHITE_WOOL", 1);
     }
-
-    // --- Profile ---
 
     private List<MenuEntry> achievements(Player viewer, Map<String, String> args) {
         MessageService ms = core.messageService();
@@ -231,7 +216,27 @@ public final class PlayMenus {
                 v.put("unlocked", String.valueOf(unlocked));
                 v.put("status", ms.renderLegacyNoPrefix(locale,
                         unlocked ? "core.achievements.unlocked" : "core.achievements.locked", Map.of()));
-                out.add(new MenuEntry(v, new ItemStack(unlocked ? a.icon() : Material.GRAY_DYE)));
+                out.add(new MenuEntry(v, unlocked ? new ItemStack(a.icon()) : me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().stackOr("GRAY_DYE", "PAPER", 1)));
+            }
+        }
+        // Games this server doesn't run: the definitions their servers stored.
+        if (core.achievements() instanceof me.playbosswar.tea.core.impl.achievement.AchievementServiceImpl impl) {
+            for (var a : impl.storedCached()) {
+                if (core.games().get(a.gameId()).isPresent()
+                        || (args.containsKey("game") && !a.gameId().value().equals(args.get("game")))) {
+                    continue;
+                }
+                boolean unlocked = core.achievements().isUnlocked(target, a.gameId(), a.id());
+                Map<String, String> v = new HashMap<>();
+                v.put("game", a.gameId().value());
+                v.put("game_name", gameName(viewer, a.gameId()));
+                v.put("achievement_id", a.id());
+                v.put("name", a.name());
+                v.put("desc", a.description());
+                v.put("unlocked", String.valueOf(unlocked));
+                v.put("status", ms.renderLegacyNoPrefix(locale,
+                        unlocked ? "core.achievements.unlocked" : "core.achievements.locked", Map.of()));
+                out.add(new MenuEntry(v, unlocked ? new ItemStack(a.icon()) : me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().stackOr("GRAY_DYE", "PAPER", 1)));
             }
         }
         return out;
@@ -258,17 +263,16 @@ public final class PlayMenus {
             v.put("team", line.team() == null ? "-" : line.team());
             v.put("duration", String.format(Locale.ROOT, "%d:%02d", m.durationSeconds() / 60, m.durationSeconds() % 60));
             v.put("when", ago(m.endedAt()));
-            Material icon = switch (line.result()) {
-                case "win" -> Material.LIME_DYE;
-                case "loss" -> Material.RED_DYE;
-                default -> Material.GRAY_DYE;
+            String icon = switch (line.result()) {
+                case "win" -> "LIME_DYE";
+                case "loss" -> "RED_DYE";
+                default -> "GRAY_DYE";
             };
-            out.add(new MenuEntry(v, new ItemStack(icon)));
+            out.add(new MenuEntry(v, me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items().stackOr(icon, "PAPER", 1)));
         }
         return out;
     }
 
-    /** Compact relative time, e.g. {@code 5m}, {@code 3h}, {@code 2d}. */
     static String ago(Instant when) {
         long s = Math.max(0, Duration.between(when, Instant.now()).getSeconds());
         if (s < 60) {

@@ -3,11 +3,7 @@ package me.playbosswar.tea.core.impl.sidebar;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
-/**
- * Applies PlaceholderAPI to a string when it is installed. PlaceholderAPI
- * classes are only touched inside {@link Hook}, so servers without it never
- * load them.
- */
+/** PlaceholderAPI classes are only touched inside {@link Hook}, so servers without it never load them. */
 public final class PapiBridge {
 
     private PapiBridge() {
@@ -17,7 +13,6 @@ public final class PapiBridge {
         return Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI");
     }
 
-    /** Resolves {@code %...%} placeholders for {@code player}; returns the text unchanged otherwise. */
     public static String apply(Player player, String text) {
         if (text.indexOf('%') < 0 || !available()) {
             return text;

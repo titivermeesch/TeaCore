@@ -1,12 +1,12 @@
 name: TeaCore
 version: '${version}'
 main: me.playbosswar.tea.core.impl.TeaCorePlugin
-api-version: '1.20'
+api-version: '1.13'
 author: playbosswar
 description: Shared engine for Tea minigames.
 load: STARTUP
 depend: [Vault]
-softdepend: [WorldEdit, FastAsyncWorldEdit, PlaceholderAPI]
+softdepend: [WorldEdit, FastAsyncWorldEdit, PlaceholderAPI, floodgate, Parties, Spigot-Party-API-PAF]
 
 commands:
   tea:
@@ -44,6 +44,24 @@ commands:
     aliases: [sidebar]
     permission: tea.board
     usage: /board
+  dashboard:
+    description: Get a one-time link to sign in to the web dashboard
+    permission: tea.dashboard.view
+    usage: /dashboard
+  quests:
+    description: Your daily and weekly quests
+    aliases: [quest]
+    permission: tea.quests
+    usage: /quests
+  leaderboard:
+    description: Top ranked players of a game
+    aliases: [lb, top]
+    permission: tea.leaderboard
+    usage: /leaderboard <game>
+  vote:
+    description: Vote for the next map while waiting for a match
+    permission: tea.vote
+    usage: /vote [map]
   play:
     description: Queue for a game, optionally filtering by map (lobby feature)
     permission: tea.lobby.play
@@ -57,12 +75,14 @@ permissions:
       tea.reload: true
       tea.version: true
       tea.arena.admin: true
+      tea.settings: true
       tea.arena.play: true
       tea.chat.use: true
       tea.chat.staff: true
       tea.chat.global: true
       tea.map.admin: true
       tea.stats: true
+      tea.dashboard.admin: true
   tea.reload:
     description: Reload TeaCore config, theme, and locale bundles
     default: op
@@ -71,6 +91,9 @@ permissions:
     default: true
   tea.arena.admin:
     description: Allocate and release arenas
+    default: op
+  tea.settings:
+    description: Change settings from /tea admin
     default: op
   tea.arena.play:
     description: Join, spectate, leave arenas via /tea arena join|spectate|observe|leave
@@ -102,9 +125,99 @@ permissions:
   tea.board:
     description: Toggle your own sidebar with /board
     default: true
+  tea.vote:
+    description: Vote for the map with /vote or the vote item
+    default: true
+  tea.ranked:
+    description: Play ranked with /play <game> ranked
+    default: true
+  tea.leaderboard:
+    description: See the ranked leaderboard with /leaderboard
+    default: true
+  tea.quests:
+    description: See your quests with /quests
+    default: true
   tea.lobby.play:
     description: Queue for a game from the lobby via /play
     default: true
   tea.lobby.admin:
     description: Manage lobby connection signs, lobby spawn, and lobby config via /tea lobby
     default: op
+  tea.dashboard.view:
+    description: Sign in to the web dashboard with /tea dashboard login and see arenas, queues, players, games and match history
+    default: op
+  tea.dashboard.chat:
+    description: See match chat in the dashboard's live arena view
+    default: op
+  tea.dashboard.history.export:
+    description: Download match history as CSV from the dashboard
+    default: op
+  tea.dashboard.queue.remove:
+    description: Remove players from a matchmaking queue in the dashboard
+    default: op
+  tea.dashboard.player.kick:
+    description: Kick players out of an arena from the dashboard
+    default: op
+  tea.dashboard.player.move:
+    description: Move players to another arena from the dashboard
+    default: op
+  tea.dashboard.player.spectator:
+    description: Make players spectators from the dashboard
+    default: op
+  tea.dashboard.arena.allocate:
+    description: Allocate arenas from the dashboard
+    default: op
+  tea.dashboard.arena.start:
+    description: Skip an arena to its next phase from the dashboard
+    default: op
+  tea.dashboard.arena.end:
+    description: End matches (with a chosen winner) from the dashboard
+    default: op
+  tea.dashboard.arena.release:
+    description: Release arenas from the dashboard
+    default: op
+  tea.dashboard.maps.reload:
+    description: Reload maps from the dashboard
+    default: op
+  tea.dashboard.maps.delete:
+    description: Delete maps from the dashboard
+    default: op
+  tea.dashboard.maps.restore:
+    description: Restore older map versions from the dashboard
+    default: op
+  tea.dashboard.sessions:
+    description: See who is signed in to the dashboard and sign them out
+    default: op
+  tea.dashboard.viewer:
+    description: "Dashboard bundle: view and export history"
+    default: false
+    children:
+      tea.dashboard.view: true
+      tea.dashboard.history.export: true
+  tea.dashboard.moderator:
+    description: "Dashboard bundle: viewer + match chat, queue and player actions"
+    default: false
+    children:
+      tea.dashboard.viewer: true
+      tea.dashboard.chat: true
+      tea.dashboard.queue.remove: true
+      tea.dashboard.player.kick: true
+      tea.dashboard.player.move: true
+      tea.dashboard.player.spectator: true
+  tea.dashboard.settings:
+    description: Change settings from the dashboard
+    default: op
+  tea.dashboard.admin:
+    description: "Dashboard bundle: everything"
+    default: op
+    children:
+      tea.dashboard.moderator: true
+      tea.dashboard.arena.allocate: true
+      tea.dashboard.arena.start: true
+      tea.dashboard.arena.end: true
+      tea.dashboard.arena.release: true
+      tea.dashboard.maps.reload: true
+      tea.dashboard.maps.delete: true
+      tea.dashboard.maps.restore: true
+      tea.dashboard.sessions: true
+      tea.dashboard.settings: true

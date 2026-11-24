@@ -12,11 +12,9 @@ import org.bukkit.inventory.ItemStack;
 public interface LootItemProvider {
 
     /**
-     * Creates the item with the given id.
-     *
      * @param id     the part after the namespace, e.g. {@code explosive}.
-     * @param amount the rolled stack size (at least 1).
-     * @return the item, or empty if the id is unknown.
+     * @param amount the rolled stack size, at least 1.
+     * @return empty if the id is unknown.
      */
     Optional<ItemStack> create(String id, int amount);
 }

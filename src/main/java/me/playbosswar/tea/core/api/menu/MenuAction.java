@@ -9,9 +9,8 @@ package me.playbosswar.tea.core.api.menu;
 public interface MenuAction {
 
     /**
-     * @param click    who clicked, in which menu, on which entry.
-     * @param argument the text after the first {@code :}, already filled in;
-     *                 empty if there was none.
+     * @param argument the text after the first {@code :}, placeholders already
+     *                 filled; empty if there was none.
      */
     void run(MenuClick click, String argument);
 }

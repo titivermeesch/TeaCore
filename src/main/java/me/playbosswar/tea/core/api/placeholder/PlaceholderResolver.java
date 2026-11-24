@@ -4,23 +4,19 @@ import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Resolves a single placeholder key to a value. Registered with the
- * {@link PlaceholderService} under a namespace so it is reached as
- * {@code %tea_<namespace>_<key>%}.
+ * Resolves placeholders registered with {@link PlaceholderService} under a
+ * namespace, reached as {@code %tea_<namespace>_<key>%}.
  */
 @FunctionalInterface
 public interface PlaceholderResolver {
 
     /**
-     * Resolves one key for a player.
-     *
-     * @param player the player the placeholder is rendered for; may be
-     *               {@code null} (PlaceholderAPI can request with no player) and
-     *               may be offline.
-     * @param key    the placeholder key with the namespace stripped (e.g. for
-     *               {@code %tea_ascend_evolutions%} this is {@code "evolutions"}).
-     * @return the resolved value, or {@code null} if this resolver does not
-     *         handle the key (the service then tries the next candidate).
+     * @param player may be offline, or {@code null} when PlaceholderAPI requests
+     *               without a player.
+     * @param key    the key without the namespace, e.g. {@code "evolutions"} for
+     *               {@code %tea_ascend_evolutions%}.
+     * @return the value, or {@code null} if this resolver does not handle the
+     *         key, in which case the service tries the next resolver.
      */
     @Nullable
     String resolve(@Nullable OfflinePlayer player, String key);

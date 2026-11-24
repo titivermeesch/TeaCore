@@ -1,0 +1,30 @@
+# The categories of one settings file (argument: file). Per category:
+# {file} {category} {title} {count} (settings in it).
+enabled: true
+permission: tea.settings
+title: "<primary>Settings"
+rows: 6
+pattern:
+  - "#########"
+  - "#CCCCCCC#"
+  - "#CCCCCCC#"
+  - "#CCCCCCC#"
+  - "#CCCCCCC#"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: "open-menu:admin-settings" }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'C':
+    source: settings-categories
+    item:
+      name: "<primary>{title}"
+      lore:
+        - "<secondary>Settings: <highlight>{count}"
+        - ""
+        - "<success>Click to open"
+      actions: ["open-menu:admin-settings-fields file={file} category={category}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No settings" }

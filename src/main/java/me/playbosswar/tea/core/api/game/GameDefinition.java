@@ -8,30 +8,20 @@ import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Immutable description of a registered game type.
+ * Immutable description of a registered game type, usually built with {@link Builder} and
+ * registered via {@link GameRegistry#register(GameDefinition)}.
  *
- * <p>Player bounds are intentionally not part of a game definition - they live on each
- * {@link me.playbosswar.tea.core.api.map.MapDefinition} so different maps can have different
- * player capacities. Games are registered via
- * {@link GameRegistry#register(GameDefinition)} and typically built with the fluent
- * {@link Builder}.
+ * <p>Player bounds live on each {@link me.playbosswar.tea.core.api.map.MapDefinition}, not
+ * here, so maps of the same game can have different capacities.
  *
- * @param id             stable identifier for this game; never {@code null}.
- * @param plugin         owning Bukkit plugin; never {@code null}.
- * @param displayNameKey translation key rendered as the game's human-readable name;
- *                       never {@code null}.
- * @param teamMode       how the game splits participants into teams; never {@code null}.
- * @param teams          declared teams when {@code teamMode == TEAMS}; defensively copied,
- *                       never {@code null}. May be empty for {@link TeamMode#FFA}.
- * @param lifecycle      phase durations and countdown configuration; never {@code null}.
- * @param mapSelection   policy used at allocation time to pick a map; never {@code null}.
- * @param pool           warm-pool sizing for this game's arenas; never {@code null}.
- * @param endMode        what to do with an arena after a match ends; never {@code null}.
- * @param arenaWorld     world-setup and gamemode preferences applied when arenas of
- *                       this game are allocated and when players join/leave; never
- *                       {@code null}.
- * @param icon           item shown for the game in menus (game selector, stats);
- *                       defaults to {@link Material#PAPER}.
+ * @param displayNameKey translation key for the game's name.
+ * @param teams          declared teams; required for {@link TeamMode#TEAMS}, may be empty
+ *                       for {@link TeamMode#FFA}. Defensively copied.
+ * @param mapSelection   picks a map at allocation time.
+ * @param endMode        what happens to an arena after a match ends.
+ * @param arenaWorld     world rules and gamemodes applied when arenas are allocated and
+ *                       players join or leave.
+ * @param icon           menu item for the game; defaults to {@link Material#PAPER}.
  */
 public record GameDefinition(
         GameId id,
@@ -47,11 +37,7 @@ public record GameDefinition(
         Material icon) {
 
     /**
-     * Canonical constructor that validates required fields and defensively copies
-     * {@code teams}.
-     *
-     * @throws NullPointerException     if any required field is {@code null}.
-     * @throws IllegalArgumentException if {@code teamMode} is {@link TeamMode#TEAMS} but
+     * @throws IllegalArgumentException if {@code teamMode} is {@link TeamMode#TEAMS} and
      *                                  {@code teams} is empty.
      */
     public GameDefinition {
@@ -72,25 +58,13 @@ public record GameDefinition(
     }
 
     /**
-     * Begins building a game definition with sensible defaults.
-     *
-     * <p>{@code displayNameKey} defaults to {@code "<id>.name"}, {@code teamMode} to
-     * {@link TeamMode#FFA}, and the remaining policies to their static factory defaults.
-     *
-     * @param id     game id; must not be {@code null}.
-     * @param plugin owning plugin; must not be {@code null}.
-     * @return a new builder, never {@code null}.
+     * Defaults: {@code displayNameKey} is {@code "<id>.name"}, {@code teamMode} is
+     * {@link TeamMode#FFA}, and the other policies use their static factory defaults.
      */
     public static Builder builder(GameId id, Plugin plugin) {
         return new Builder(id, plugin);
     }
 
-    /**
-     * Fluent builder for {@link GameDefinition}.
-     *
-     * <p>All setters return the same builder instance. Call {@link #build()} to produce the
-     * immutable definition.
-     */
     public static final class Builder {
         private final GameId id;
         private final Plugin plugin;
@@ -110,113 +84,54 @@ public record GameDefinition(
             this.displayNameKey = id.value() + ".name";
         }
 
-        /**
-         * Sets the translation key used as the game's display name.
-         *
-         * @param key translation key; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder displayNameKey(String key) {
             this.displayNameKey = key;
             return this;
         }
 
-        /**
-         * Sets the team mode.
-         *
-         * @param v new team mode; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder teamMode(TeamMode v) {
             this.teamMode = v;
             return this;
         }
 
-        /**
-         * Sets the declared teams.
-         *
-         * @param v teams to register, or {@code null} to clear.
-         * @return this builder, for chaining.
-         */
+        /** {@code null} clears the teams. */
         public Builder teams(@Nullable List<TeamDefinition> v) {
             this.teams = v == null ? List.of() : List.copyOf(v);
             return this;
         }
 
-        /**
-         * Sets the lifecycle phase configuration.
-         *
-         * @param v lifecycle configuration; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder lifecycle(LifecycleConfig v) {
             this.lifecycle = v;
             return this;
         }
 
-        /**
-         * Sets the map-selection policy.
-         *
-         * @param v map selection policy; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder mapSelection(MapSelectionPolicy v) {
             this.mapSelection = v;
             return this;
         }
 
-        /**
-         * Sets the warm-pool configuration.
-         *
-         * @param v pool configuration; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder pool(PoolConfig v) {
             this.pool = v;
             return this;
         }
 
-        /**
-         * Sets the end-of-match behavior.
-         *
-         * @param v end mode; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder endMode(EndMode v) {
             this.endMode = v;
             return this;
         }
 
-        /**
-         * Sets the arena-world configuration (world rules, difficulty,
-         * gamemodes, time/weather).
-         *
-         * @param v arena-world configuration; must not be {@code null}.
-         * @return this builder, for chaining.
-         */
         public Builder arenaWorld(ArenaWorldConfig v) {
             this.arenaWorld = v;
             return this;
         }
 
-        /**
-         * Sets the item shown for this game in menus such as the game selector.
-         *
-         * @param v the icon material; {@code null} means {@link Material#PAPER}.
-         * @return this builder, for chaining.
-         */
+        /** {@code null} means {@link Material#PAPER}. */
         public Builder icon(Material v) {
             this.icon = v;
             return this;
         }
 
-        /**
-         * Builds the immutable definition.
-         *
-         * @return a new {@link GameDefinition}, never {@code null}.
-         * @throws IllegalArgumentException if the configured state is invalid (see the
-         *                                  canonical constructor).
-         */
+        /** @throws IllegalArgumentException if TEAMS mode has no teams. */
         public GameDefinition build() {
             return new GameDefinition(id, plugin, displayNameKey,
                     teamMode, teams, lifecycle, mapSelection, pool, endMode, arenaWorld, icon);

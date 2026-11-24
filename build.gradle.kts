@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "me.playbosswar.tea"
-version = (project.findProperty("teacoreVersion") as String?) ?: "0.1.0-SNAPSHOT"
+version = (project.findProperty("teacoreVersion") as String?) ?: "0.2.0-SNAPSHOT"
 
 // Spigot API version driving compileOnly / testImplementation. Defaults to the
 // lowest supported release (the first Minecraft version that requires Java 21)
@@ -24,6 +24,35 @@ repositories {
     // VaultAPI is published via JitPack (hard runtime dep; shipped by the
     // server admin, not shaded into our jar).
     maven("https://jitpack.io")
+    // Floodgate API + Cumulus forms (soft dependency: Bedrock menus as forms).
+    maven("https://repo.opencollab.dev/main/")
+    // Party plugin APIs (soft dependencies: parties queue together).
+    maven("https://repo.alessiodp.com/releases/")
+    maven("https://simonsator.de/repo/")
+}
+
+// --- Version support ---------------------------------------------------------
+// TeaCore runs from 1.8.8 to the latest release, on plain Spigot or any fork.
+//   main    shared code. Compiled against the 1.8.8 API, and `modernCheck`
+//           compiles it again against the modern API: it may only use what
+//           both have.
+//   modern  src/modern/java: the platform for 1.13+ servers (modern API only).
+//   legacy  src/legacy/java: the platform for 1.8-1.12 servers (1.8.8 API).
+//   cloudnet3 src/cloudnet3/java: the CloudNet v3 integration, used only when
+//           the server runs as a CloudNet v3 service.
+// The plugin jar holds all of them; Platforms picks one at startup.
+val legacyApiDep = "org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT"
+val modernApiDep = "org.spigotmc:spigot-api:$spigotApiVersion"
+val shared: Configuration by configurations.creating
+configurations.compileOnly { extendsFrom(shared) }
+sourceSets {
+    create("modern") { java.srcDir("src/modern/java") }
+    create("legacy") { java.srcDir("src/legacy/java") }
+    create("cloudnet3") { java.srcDir("src/cloudnet3/java") }
+}
+listOf("modern", "legacy").forEach { set ->
+    configurations["${set}CompileOnly"].extendsFrom(shared)
+    configurations["${set}Implementation"].extendsFrom(configurations.implementation.get())
 }
 
 java {
@@ -36,6 +65,7 @@ java {
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.release.set(21)
+    options.compilerArgs.addAll(listOf("-Xmaxerrs", "2000"))
 }
 
 tasks.withType<Test>().configureEach {
@@ -43,17 +73,36 @@ tasks.withType<Test>().configureEach {
 }
 
 tasks.withType<ProcessResources>().configureEach {
+    // Without this, Gradle keeps an old plugin.yml after a version change.
+    inputs.property("version", project.version)
     filesMatching("plugin.yml") {
         expand("version" to project.version)
     }
 }
 
 dependencies {
-    compileOnly("org.spigotmc:spigot-api:$spigotApiVersion")
-    compileOnly(libs.worldedit.bukkit) { isTransitive = false }
-    compileOnly(libs.worldedit.core) { isTransitive = false }
-    compileOnly("com.github.MilkBowl:VaultAPI:1.7.1") { isTransitive = false }
-    compileOnly("me.clip:placeholderapi:2.11.6")
+    // Its old bungeecord-chat snapshot no longer resolves; Tea never uses it.
+    compileOnly(legacyApiDep) { exclude(group = "net.md-5") }
+    "modernCompileOnly"(modernApiDep)
+    "modernCompileOnly"(sourceSets.main.get().output)
+    "legacyCompileOnly"(legacyApiDep) { exclude(group = "net.md-5") }
+    "legacyCompileOnly"(sourceSets.main.get().output)
+    // CloudNet v3.4.5 is no longer published to any Maven repository; the API
+    // jars (Apache-2.0) come from its release zip. CloudNet provides them at runtime.
+    "cloudnet3CompileOnly"(legacyApiDep) { exclude(group = "net.md-5") }
+    "cloudnet3CompileOnly"(sourceSets.main.get().output)
+    "cloudnet3CompileOnly"(files("libs/cloudnet-v3/wrapper.jar", "libs/cloudnet-v3/cloudnet-bridge.jar"))
+    shared(libs.worldedit.bukkit) { isTransitive = false }
+    shared(libs.worldedit.core) { isTransitive = false }
+    shared("com.github.MilkBowl:VaultAPI:1.7.1") { isTransitive = false }
+    shared("me.clip:placeholderapi:2.11.6")
+    shared("org.geysermc.floodgate:api:2.2.4-SNAPSHOT") { isTransitive = false }
+    shared("org.geysermc.cumulus:cumulus:1.1.2") { isTransitive = false }
+    shared("com.alessiodp.parties:parties-api:3.2.17") { isTransitive = false }
+    shared("de.simonsator:spigot-party-api-for-party-and-friends:1.0.7-RELEASE") { isTransitive = false }
+    shared("de.simonsator:Party-and-Friends-MySQL-Edition-Spigot-API:1.6.2-RELEASE") { isTransitive = false }
+    // Item, sound and particle names across versions (shaded, relocated).
+    implementation("com.github.cryptomorin:XSeries:14.0.0")
 
     implementation(libs.adventure.api)
     implementation(libs.adventure.minimessage)
@@ -69,7 +118,7 @@ dependencies {
     // it can't collide with another plugin's copy.
     implementation("dev.faststats.metrics:bukkit:0.22.0")
 
-    testImplementation("org.spigotmc:spigot-api:$spigotApiVersion")
+    testImplementation(modernApiDep)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.archunit.junit5)
     testImplementation(libs.assertj)
@@ -102,9 +151,27 @@ tasks.named<Copy>("processResources") {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
+// The shared code must also compile against the modern API (no 1.8-only calls).
+val modernCheck by tasks.registering(JavaCompile::class) {
+    description = "Compiles the shared code against the modern API too."
+    group = "verification"
+    source = sourceSets.main.get().java
+    classpath = shared + configurations["compileClasspath"].filter { !it.name.let { n -> n.startsWith("spigot-api-1.8.8") } } +
+        configurations.detachedConfiguration(dependencies.create(modernApiDep))
+    destinationDirectory.set(layout.buildDirectory.dir("modern-check"))
+    options.release.set(21)
+    options.encoding = "UTF-8"
+    options.compilerArgs.addAll(listOf("-Xmaxerrs", "2000"))
+}
+tasks.named("check") { dependsOn(modernCheck) }
+tasks.jar {
+    from(sourceSets["modern"].output, sourceSets["legacy"].output, sourceSets["cloudnet3"].output)
+}
+
 tasks.shadowJar {
     archiveClassifier.set("all")
     mergeServiceFiles()
+    from(sourceSets["modern"].output, sourceSets["legacy"].output, sourceSets["cloudnet3"].output)
 
     val base = "me.playbosswar.tea.core.libs"
     relocate("net.kyori", "$base.kyori")
@@ -120,6 +187,7 @@ tasks.shadowJar {
     relocate("org.jetbrains.annotations", "$base.annotations")
     relocate("kotlin", "$base.kotlin")
     relocate("dev.faststats", "$base.faststats")
+    relocate("com.cryptomorin.xseries", "$base.xseries")
     // org.sqlite.* is intentionally NOT relocated: the native .so binds JNI
     // symbols to the original package name and relocating breaks at connect.
 }

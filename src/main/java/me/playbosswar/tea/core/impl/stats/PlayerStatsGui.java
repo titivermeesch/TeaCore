@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import me.playbosswar.tea.core.api.message.MessageService;
-import me.playbosswar.tea.core.api.stats.StatsProvider;
 import me.playbosswar.tea.core.api.stats.StatsRegistry;
 import me.playbosswar.tea.core.api.stats.StatsSchema;
 import org.bukkit.Bukkit;
@@ -16,16 +15,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Builds + opens an inventory-based stats viewer. Top-center slot is a
- * summary item; the second row holds one paper item per game with a persisted
- * stats schema, each lore-listing the player's stat key/value pairs from that
- * game's effective {@link StatsProvider}. A close button sits at the bottom-center.
- *
- * <p>Schemas come from the shared database (see {@code tea_stats_schemas}), so
- * a lobby renders every game in the fleet — even ones whose own plugin isn't
- * loaded on this server.
- */
+/** Schemas come from the shared database, so a lobby lists every game, even ones whose plugin isn't loaded here. */
 public final class PlayerStatsGui {
 
     private static final int SIZE = 27;
@@ -99,10 +89,8 @@ public final class PlayerStatsGui {
         ItemStack stack = new ItemStack(Material.PAPER);
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) return stack;
-        // Lobby servers don't have game-plugin lang bundles loaded, so the
-        // schema's displayNameKey often resolves to a missing-translation
-        // marker. Fall back to a humanized form of the game id when the key
-        // isn't registered anywhere - it's more readable than "<error>...".
+        // Lobbies don't load game lang bundles, so fall back to a humanized game id
+        // instead of a missing-translation marker.
         String displayName = messageService.hasKey(schema.displayNameKey())
                 ? messageService.renderLegacyNoPrefix(locale, schema.displayNameKey(), Map.of())
                 : humanize(schema.gameId().value());
@@ -124,12 +112,6 @@ public final class PlayerStatsGui {
         return stack;
     }
 
-    /**
-     * Turns a snake_case game id into a Title-Cased label, e.g.
-     * {@code "ascend"} -> {@code "Ascend"}, {@code "team_deathmatch"} ->
-     * {@code "Team Deathmatch"}. Used as the lobby fallback for
-     * {@link StatsSchema#displayNameKey()} when no lang bundle defines it.
-     */
     private static String humanize(String id) {
         if (id == null || id.isEmpty()) return "";
         StringBuilder sb = new StringBuilder(id.length());

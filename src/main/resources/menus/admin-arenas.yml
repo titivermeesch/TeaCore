@@ -1,0 +1,36 @@
+# Arena list of the arena manager (optional argument: game).
+# Per arena: {arena} (full id) {arena_id} (short) {game} {game_name} {map_id}
+# {map_name} {state} {state_label} {players} {max} {min} {spectators} {server}
+# {local} {time} (left in the current phase) {live}
+enabled: true
+permission: tea.arena.admin
+title: "<primary>Arenas"
+rows: 6
+refresh-ticks: 20
+pattern:
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "AAAAAAAAA"
+  - "B##<#>##X"
+items:
+  '#': { material: GRAY_STAINED_GLASS_PANE, name: " " }
+  '<': { material: ARROW, name: "<secondary>Previous page", action: previous-page }
+  '>': { material: ARROW, name: "<secondary>Next page <muted>({page}/{pages})", action: next-page }
+  'B': { material: ARROW, name: "<secondary>Back", action: back }
+  'X': { material: BARRIER, name: "<error>Close", action: close }
+lists:
+  'A':
+    source: admin-arenas
+    item:
+      name: "<primary>{game_name} <muted>#{arena_id}"
+      lore:
+        - "<secondary>Map: <highlight>{map_name}"
+        - "<secondary>State: {state_label} <muted>({time})"
+        - "<secondary>Players: <highlight>{players}/{max} <muted>+{spectators} watching"
+        - "<secondary>Server: <muted>{server}"
+        - ""
+        - "<success>Click to manage"
+      actions: ["open-menu:admin-arena arena={arena}", "sound:UI_BUTTON_CLICK"]
+    empty: { material: BARRIER, name: "<muted>No arenas right now" }

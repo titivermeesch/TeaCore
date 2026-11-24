@@ -13,19 +13,13 @@ import java.util.logging.Logger;
 import me.playbosswar.tea.core.api.loot.LootItemProvider;
 import me.playbosswar.tea.core.api.loot.LootService;
 import me.playbosswar.tea.core.api.loot.LootTable;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.Registry;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.potion.PotionType;
 
-/** Default {@link LootService}. */
 public final class LootServiceImpl implements LootService {
 
     /** Pre-1.20.5 Bukkit enchantment names still found in older configs. */
@@ -82,9 +76,7 @@ public final class LootServiceImpl implements LootService {
         return Optional.ofNullable(tables.get(id));
     }
 
-    // --- Parsing ---
-
-    /** One weighted entry; the item is built fresh on every roll. */
+    /** The item is built fresh on every roll. */
     private record Entry(Map<String, Object> spec, int weight) { }
 
     @SuppressWarnings("unchecked")
@@ -99,7 +91,8 @@ public final class LootServiceImpl implements LootService {
         }
         int weight = spec.get("weight") instanceof Number n ? n.intValue() : 1;
         if (spec.containsKey("material")) {
-            if (Material.matchMaterial(String.valueOf(spec.get("material")).trim()) == null) {
+            if (me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items()
+                    .stack(String.valueOf(spec.get("material")).trim(), 1).isEmpty()) {
                 return null;
             }
         } else if (itemRef(spec) == null) {
@@ -126,11 +119,17 @@ public final class LootServiceImpl implements LootService {
         int amount = parseAmount(spec.get("amount"), random);
         ItemStack item;
         if (spec.containsKey("material")) {
-            Material material = Material.matchMaterial(String.valueOf(spec.get("material")).trim());
-            if (material == null) {
-                return Optional.empty();
+            String name = String.valueOf(spec.get("material")).trim();
+            var items = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().items();
+            if (spec.get("potion") instanceof String potion && name.toUpperCase(Locale.ROOT).endsWith("POTION")) {
+                item = items.potion(potion.trim(), amount);
+            } else {
+                Optional<ItemStack> stack = items.stack(name, amount);
+                if (stack.isEmpty()) {
+                    return Optional.empty();
+                }
+                item = stack.get();
             }
-            item = new ItemStack(material, amount);
         } else {
             String ref = itemRef(spec);
             int colon = ref == null ? -1 : ref.indexOf(':');
@@ -163,13 +162,6 @@ public final class LootServiceImpl implements LootService {
         if (spec.get("lore") instanceof List<?> lines) {
             meta.setLore(lines.stream().map(String::valueOf).map(l -> l.replace('&', '§')).toList());
         }
-        if (spec.get("potion") instanceof String potion && meta instanceof PotionMeta potionMeta) {
-            try {
-                potionMeta.setBasePotionType(PotionType.valueOf(potion.trim().toUpperCase(Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // unknown potion type: leave it plain
-            }
-        }
         if (spec.get("enchantments") instanceof List<?> list) {
             for (Object entry : list) {
                 String[] parts = String.valueOf(entry).split(":");
@@ -187,8 +179,12 @@ public final class LootServiceImpl implements LootService {
     static Enchantment enchantment(String name) {
         String trimmed = name.trim();
         String key = LEGACY_ENCHANTS.getOrDefault(trimmed.toUpperCase(Locale.ROOT), trimmed.toLowerCase(Locale.ROOT));
-        Enchantment found = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(key));
-        return found != null ? found : Enchantment.getByName(trimmed.toUpperCase(Locale.ROOT));
+        // XSeries knows each version's name (sharpness / DAMAGE_ALL).
+        return com.cryptomorin.xseries.XEnchantment.of(key.toUpperCase(Locale.ROOT))
+                .or(() -> com.cryptomorin.xseries.XEnchantment.of(trimmed.toUpperCase(Locale.ROOT)))
+                .filter(com.cryptomorin.xseries.XEnchantment::isSupported)
+                .map(com.cryptomorin.xseries.XEnchantment::get)
+                .orElse(null);
     }
 
     private static int parseAmount(Object value, Random random) {
@@ -211,8 +207,6 @@ public final class LootServiceImpl implements LootService {
             return fallback;
         }
     }
-
-    // --- Table ---
 
     private final class Table implements LootTable {
         private final String id;

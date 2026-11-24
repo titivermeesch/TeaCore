@@ -15,41 +15,20 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.Plugin;
 
 /**
- * Merges missing keys from a plugin's bundled YAML resource into the matching
- * on-disk file.
+ * Adds keys from a plugin's bundled YAML resource that are missing from the
+ * on-disk file, so new options from a plugin update reach an existing
+ * {@code config.yml}. Call it early in {@code onEnable()}.
  *
- * <p>
- * Bukkit's built-in {@code saveDefaultConfig() / copyDefaults} only kicks in
- * when the disk file is absent or for top-level scalars; once admins have
- * customized their {@code config.yml}, new keys shipped in a plugin update
- * never reach disk. Game plugins that ship a default {@code config.yml} should
- * call this method early in {@code onEnable()} to surface newly-added knobs
- * without touching anything the admin already set.
- *
- * <p>
- * <b>Semantics:</b>
  * <ul>
- *   <li>Walks every leaf path in the bundled resource (lists/maps count as
- *       leaves; the walker only descends into nested {@link ConfigurationSection
- *       sections}).</li>
- *   <li>Adds a path to the on-disk file only when {@code isSet} returns
- *       {@code false} - existing values, including ones the admin set to a
- *       different value, are preserved verbatim.</li>
- *   <li>Best-effort: comments attached to newly-added keys are copied across
- *       on Bukkit/Paper builds that expose {@code getComments / setComments}
- *       (1.18.1+). Older runtimes silently skip the comment carryover and
- *       still merge the values.</li>
- *   <li>If the on-disk file does not exist yet, this method is a no-op -
- *       {@link Plugin#saveDefaultConfig()} should be called first to plant
- *       the bundled file.</li>
+ *   <li>Lists and maps count as single values; only nested sections are
+ *       walked.</li>
+ *   <li>Values already set on disk are never changed.</li>
+ *   <li>Comments of added keys are copied on 1.18.1+ only.</li>
+ *   <li>No-op if the on-disk file does not exist; call
+ *       {@link Plugin#saveDefaultConfig()} first.</li>
+ *   <li>Added keys go at the end of their parent section, not at their
+ *       position in the bundled file.</li>
  * </ul>
- *
- * <p>
- * <b>Limitations:</b> newly-added keys land at the end of their parent
- * section rather than at the position they occupy in the bundled resource;
- * Bukkit's {@code YamlConfiguration} writes in insertion order, and the
- * admin's existing keys were inserted first. Reorganizing the file by hand
- * is always safe.
  */
 public final class ConfigSync {
 
@@ -57,14 +36,10 @@ public final class ConfigSync {
     }
 
     /**
-     * Convenience overload that targets the plugin's standard
-     * {@code config.yml} ({@link Plugin#getDataFolder()}/config.yml against
-     * the bundled {@code config.yml} resource).
+     * Merges the bundled {@code config.yml} into the data folder's
+     * {@code config.yml}.
      *
-     * @param plugin plugin whose resource and data folder to use; must not be
-     *               {@code null}.
-     * @return the number of keys added; 0 if everything was already present
-     *         or the disk file does not exist yet.
+     * @return the number of keys added
      */
     public static int mergeMissingKeys(Plugin plugin) {
         return mergeMissingKeys(plugin, "config.yml",
@@ -72,24 +47,12 @@ public final class ConfigSync {
     }
 
     /**
-     * Copies any keys that exist in the bundled {@code resourcePath} but are
-     * missing from the on-disk file, preserving every value the admin already
-     * authored.
-     *
-     * @param plugin       plugin whose jar to read the resource from; must
-     *                     not be {@code null}.
-     * @param resourcePath classpath path of the bundled YAML inside the jar
-     *                     (e.g. {@code "config.yml"}); must not be
-     *                     {@code null}.
-     * @param onDisk       absolute path to the live YAML file admins edit;
-     *                     must not be {@code null}.
-     * @return the number of keys added; 0 if everything was already present
-     *         or {@code onDisk} does not exist yet.
+     * @param resourcePath path of the bundled YAML inside the jar, e.g.
+     *                     {@code "config.yml"}
+     * @return the number of keys added
      */
     public static int mergeMissingKeys(Plugin plugin, String resourcePath, Path onDisk) {
         if (!Files.isRegularFile(onDisk)) {
-            // Nothing to merge into; saveDefaultConfig() (or saveResource())
-            // is responsible for planting the bundled file initially.
             return 0;
         }
         YamlConfiguration jarYaml;
@@ -130,12 +93,6 @@ public final class ConfigSync {
         return added;
     }
 
-    /**
-     * Walks the section tree depth-first, appending every leaf path (i.e.
-     * paths whose value is not itself a section) to {@code out}. Lists and
-     * maps stored under a single key count as leaves and are not descended
-     * into.
-     */
     private static void collectLeafPaths(ConfigurationSection section, String prefix, List<String> out) {
         for (String key : section.getKeys(false)) {
             String path = prefix.isEmpty() ? key : prefix + "." + key;
@@ -148,24 +105,38 @@ public final class ConfigSync {
         }
     }
 
-    /**
-     * Best-effort comment carry-through. Older Bukkit forks do not expose
-     * {@code getComments / setComments}, so we swallow {@link
-     * NoSuchMethodError} and {@link UnsupportedOperationException} rather
-     * than failing the whole merge.
-     */
     private static void tryCopyComments(YamlConfiguration source, YamlConfiguration target, String path) {
+        // The comment API only exists from 1.18, so it is called reflectively.
+        if (COMMENTS == null) {
+            return;
+        }
         try {
-            List<String> header = source.getComments(path);
-            if (header != null && !header.isEmpty()) {
-                target.setComments(path, header);
-            }
-            List<String> inline = source.getInlineComments(path);
-            if (inline != null && !inline.isEmpty()) {
-                target.setInlineComments(path, inline);
-            }
-        } catch (NoSuchMethodError | UnsupportedOperationException ignored) {
-            // Older API: silently skip; values still merge.
+            copy(source, target, path, COMMENTS[0], COMMENTS[1]);
+            copy(source, target, path, COMMENTS[2], COMMENTS[3]);
+        } catch (ReflectiveOperationException | UnsupportedOperationException ignored) {
+            // values still merge
+        }
+    }
+
+    private static final java.lang.reflect.Method[] COMMENTS = commentMethods();
+
+    private static java.lang.reflect.Method[] commentMethods() {
+        try {
+            Class<?> c = org.bukkit.configuration.ConfigurationSection.class;
+            return new java.lang.reflect.Method[] {
+                c.getMethod("getComments", String.class), c.getMethod("setComments", String.class, List.class),
+                c.getMethod("getInlineComments", String.class), c.getMethod("setInlineComments", String.class, List.class)};
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void copy(YamlConfiguration source, YamlConfiguration target, String path,
+                             java.lang.reflect.Method get, java.lang.reflect.Method set) throws ReflectiveOperationException {
+        List<String> lines = (List<String>) get.invoke(source, path);
+        if (lines != null && !lines.isEmpty()) {
+            set.invoke(target, path, lines);
         }
     }
 }

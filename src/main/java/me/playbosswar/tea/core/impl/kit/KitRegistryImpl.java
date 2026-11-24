@@ -27,10 +27,8 @@ import org.bukkit.inventory.PlayerInventory;
 public final class KitRegistryImpl implements KitRegistry {
 
     private final ConcurrentHashMap<GameId, ConcurrentHashMap<String, Supplier<Ability>>> abilityFactories = new ConcurrentHashMap<>();
-    // Insertion-ordered per-game kit map so the kit picker GUI shows kits in
-    // the order they were registered (the game plugin's intent), not the
-    // hash-bucket order. Synchronized externally via the kits-mutex below
-    // since LinkedHashMap is not thread-safe.
+    // LinkedHashMap keeps registration order for the kit picker. Not thread-safe,
+    // so it is guarded by the kits mutex.
     private final java.util.concurrent.ConcurrentHashMap<GameId, java.util.LinkedHashMap<String, Kit>> kits = new java.util.concurrent.ConcurrentHashMap<>();
     private final Object kitsMutex = new Object();
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<GameId, String>> selections = new ConcurrentHashMap<>();
@@ -54,6 +52,16 @@ public final class KitRegistryImpl implements KitRegistry {
         synchronized (kitsMutex) {
             kits.computeIfAbsent(kit.gameId(), g -> new java.util.LinkedHashMap<>())
                     .put(kit.kitId(), kit);
+        }
+    }
+
+    @Override
+    public void unregisterKit(GameId gameId, String kitId) {
+        synchronized (kitsMutex) {
+            java.util.LinkedHashMap<String, Kit> forGame = kits.get(gameId);
+            if (forGame != null) {
+                forGame.remove(kitId);
+            }
         }
     }
 
@@ -122,7 +130,7 @@ public final class KitRegistryImpl implements KitRegistry {
             ps.executeUpdate();
             return true;
         } catch (Exception e) {
-            // Likely a PK collision (already unlocked) — treat as success.
+            // Likely a PK collision (already unlocked): treat as success.
             if (isUnlocked(playerId, kit)) return true;
             logger.log(Level.WARNING, "Failed to record kit unlock for " + playerId + " / " + kit.kitId(), e);
             return false;

@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 import org.jetbrains.annotations.Nullable;
 
-/** Serialized map definition for the dashboard. */
 public record MapDto(
         String gameId,
         String mapId,

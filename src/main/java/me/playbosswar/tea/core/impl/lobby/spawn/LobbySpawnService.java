@@ -20,13 +20,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * Optional hub spawn manager. When {@code lobby.manage-spawn} is true,
- * teleports players
- * to the configured spawn and sets the configured gamemode on join and respawn.
- * Disabled by flipping the config flag so external lobby plugins can own this
- * flow instead.
- */
+/** Off with {@code lobby.manage-spawn: false} so another lobby plugin can own spawning. */
 public final class LobbySpawnService implements Listener {
 
     private final JavaPlugin plugin;
@@ -71,7 +65,6 @@ public final class LobbySpawnService implements Listener {
         return gameMode;
     }
 
-    /** Resolves the configured spawn, or null if no valid world is set. */
     public @Nullable Location spawnLocation() {
         World world = resolveWorld();
         if (world == null)
@@ -79,10 +72,6 @@ public final class LobbySpawnService implements Listener {
         return new Location(world, spawnX, spawnY, spawnZ, spawnYaw, spawnPitch);
     }
 
-    /**
-     * Teleports the player to the configured spawn and applies the configured
-     * gamemode.
-     */
     public boolean applyTo(Player player) {
         if (!manageSpawn)
             return false;
@@ -94,10 +83,6 @@ public final class LobbySpawnService implements Listener {
         return true;
     }
 
-    /**
-     * Writes the player's current location as the lobby spawn and persists
-     * config.yml.
-     */
     public void setSpawn(Player player) {
         Location loc = player.getLocation();
         FileConfiguration cfg = plugin.getConfig();
@@ -111,7 +96,6 @@ public final class LobbySpawnService implements Listener {
         reload();
     }
 
-    /** Persists the manage-spawn flag and reloads. */
     public void setManageSpawn(boolean enabled) {
         FileConfiguration cfg = plugin.getConfig();
         cfg.set("lobby.manage-spawn", enabled);
@@ -119,7 +103,6 @@ public final class LobbySpawnService implements Listener {
         reload();
     }
 
-    /** Persists the gamemode and reloads. */
     public void setGameMode(GameMode mode) {
         FileConfiguration cfg = plugin.getConfig();
         cfg.set("lobby.gamemode", mode.name());
@@ -139,9 +122,8 @@ public final class LobbySpawnService implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         if (!manageSpawn)
             return;
-        // If the player logged out inside an arena world, don't yank them out - the
-        // arena
-        // manager will deal with reconnects separately. Only teleport fresh arrivals.
+        // Players who logged out inside an arena world are handled by the arena
+        // manager's reconnect logic. Only teleport fresh arrivals.
         Player p = event.getPlayer();
         if (p.getWorld().getName().startsWith("tea_arena_"))
             return;
@@ -160,11 +142,8 @@ public final class LobbySpawnService implements Listener {
     }
 
     /**
-     * When a player leaves an arena on this (standalone) backend they land wherever
-     * {@code ArenaManagerImpl.teleportOut} drops them. In cross-server mode they're
-     * already being punted via {@code proxyTransport} before this fires, so the
-     * teleport below is a no-op. Runs next tick so it wins over the core's
-     * teleport.
+     * Runs next tick so it wins over the core's teleport. In cross-server mode the
+     * player is already being sent away, so this is a no-op.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onArenaLeave(ArenaPlayerLeaveEvent event) {

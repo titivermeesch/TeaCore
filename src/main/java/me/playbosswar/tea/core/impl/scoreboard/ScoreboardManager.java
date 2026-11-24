@@ -21,13 +21,6 @@ import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 
-/**
- * Owns per-player sidebar scoreboards for TeaCore. Features contribute content
- * by registering a {@link SidebarProvider} rather than each managing its own
- * Bukkit scoreboard and tick loop. Twice a second the manager asks every
- * provider whether it wants a given player's sidebar and renders the
- * highest-priority one that applies, clearing the board when none do.
- */
 public final class ScoreboardManager implements Listener {
 
     private static final String OBJECTIVE = "tea_sidebar";
@@ -35,6 +28,8 @@ public final class ScoreboardManager implements Listener {
 
     private final Plugin plugin;
     private final List<SidebarProvider> providers = new CopyOnWriteArrayList<>();
+    /** Highest priority first; the sort is stable so ties keep registration order. */
+    private volatile List<SidebarProvider> byPriority = List.of();
     private final Set<UUID> active = ConcurrentHashMap.newKeySet();
     private BukkitTask task;
 
@@ -42,15 +37,17 @@ public final class ScoreboardManager implements Listener {
         this.plugin = plugin;
     }
 
-    /** Registers a content provider. Providers are polled in registration order. */
     public void register(SidebarProvider provider) {
         providers.add(provider);
+        List<SidebarProvider> sorted = new java.util.ArrayList<>(providers);
+        sorted.sort(java.util.Comparator.comparingInt(SidebarProvider::priority).reversed());
+        byPriority = List.copyOf(sorted);
     }
 
     public void start() {
         if (task != null)
             return;
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 10L, 10L);
+        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 10L, 1L);
     }
 
     public void stop() {
@@ -66,19 +63,14 @@ public final class ScoreboardManager implements Listener {
         active.clear();
     }
 
-    /**
-     * Recomputes and applies the player's sidebar immediately, picking the
-     * highest-priority provider that applies. Call after an event that should
-     * update the board without waiting for the next tick (e.g. a toggle).
-     */
+    /** Applies immediately instead of waiting for the next tick. */
     public void refresh(Player player) {
         SidebarProvider.Sidebar best = null;
-        int bestPriority = Integer.MIN_VALUE;
-        for (SidebarProvider provider : providers) {
+        for (SidebarProvider provider : byPriority) {
             Optional<SidebarProvider.Sidebar> candidate = provider.sidebarFor(player);
-            if (candidate.isPresent() && provider.priority() > bestPriority) {
-                bestPriority = provider.priority();
+            if (candidate.isPresent()) {
                 best = candidate.get();
+                break;
             }
         }
         if (best == null)
@@ -87,9 +79,16 @@ public final class ScoreboardManager implements Listener {
             apply(player, best.title(), best.lines());
     }
 
+    private static final int REFRESH_TICKS = 10;
+    private long tickCount;
+
+    /** Refreshes a tenth of the players each tick to spread the work. */
     private void tick() {
+        int slot = (int) (tickCount++ % REFRESH_TICKS);
         for (Player p : Bukkit.getOnlinePlayers()) {
-            refresh(p);
+            if (Math.floorMod(p.getUniqueId().hashCode(), REFRESH_TICKS) == slot) {
+                refresh(p);
+            }
         }
     }
 
@@ -101,16 +100,15 @@ public final class ScoreboardManager implements Listener {
         }
         Objective obj = board.getObjective(OBJECTIVE);
         if (obj == null) {
-            obj = board.registerNewObjective(OBJECTIVE, "dummy", title);
+            obj = scoreboards().newObjective(board, OBJECTIVE, fitTitle(title));
             obj.setDisplaySlot(DisplaySlot.SIDEBAR);
         } else {
-            obj.setDisplayName(title);
+            obj.setDisplayName(fitTitle(title));
         }
 
-        // Sidebar entries sort by descending score, so the first line gets the
-        // highest. Each line uses a unique invisible entry token and keeps its
-        // visible text in a per-slot team prefix, so blank/duplicate lines don't
-        // collide on the entry name.
+        // Entries sort by descending score. Each line uses a unique invisible entry
+        // and keeps its text in a per-slot team prefix, so blank or duplicate lines
+        // don't collide on the entry name.
         int n = lines.size();
         for (int i = 0; i < n; i++) {
             String token = slotToken(i);
@@ -132,7 +130,80 @@ public final class ScoreboardManager implements Listener {
             board.resetScores(slotToken(i));
             team.unregister();
         }
+        syncTeamColors(player, board);
         active.add(player.getUniqueId());
+    }
+
+    private static final String ARENA_TEAM_PREFIX = "tea_at_";
+
+    private void syncTeamColors(Player viewer, Scoreboard board) {
+        java.util.Map<String, java.util.Set<String>> wanted = new java.util.HashMap<>();
+        java.util.Map<String, ChatColor> colors = new java.util.HashMap<>();
+        try {
+            me.playbosswar.tea.core.api.TeaCoreAPI core = me.playbosswar.tea.core.api.TeaCoreAPI.get();
+            core.arenas().arenaOf(viewer.getUniqueId()).ifPresent(arena -> {
+                if (core.teams().isSingleTeam(arena.id())) {
+                    return;
+                }
+                for (me.playbosswar.tea.core.api.team.Team team : core.teams().teamsFor(arena.id())) {
+                    String name = ARENA_TEAM_PREFIX + team.id().value();
+                    if (name.length() > 16) name = name.substring(0, 16);
+                    java.util.Set<String> members = new java.util.HashSet<>();
+                    for (UUID uuid : team.members()) {
+                        Player p = Bukkit.getPlayer(uuid);
+                        if (p != null) members.add(p.getName());
+                    }
+                    wanted.put(name, members);
+                    colors.put(name, colorOf(team.colorStyleSlot()));
+                }
+            });
+        } catch (IllegalStateException notReady) {
+            return;
+        }
+        for (Team team : new HashSet<>(board.getTeams())) {
+            if (team.getName().startsWith(ARENA_TEAM_PREFIX) && !wanted.containsKey(team.getName())) {
+                team.unregister();
+            }
+        }
+        for (var entry : wanted.entrySet()) {
+            Team team = board.getTeam(entry.getKey());
+            if (team == null) {
+                team = board.registerNewTeam(entry.getKey());
+            }
+            ChatColor color = colors.get(entry.getKey());
+            scoreboards().setTeamColor(team, color);
+            for (String e : new HashSet<>(team.getEntries())) {
+                if (!entry.getValue().contains(e)) team.removeEntry(e);
+            }
+            for (String name : entry.getValue()) {
+                if (!team.hasEntry(name)) team.addEntry(name);
+            }
+        }
+    }
+
+    private static ChatColor colorOf(String slot) {
+        if (slot == null) return ChatColor.WHITE;
+        // Theme slots look like "team.red"; the colour is the last part.
+        slot = slot.substring(slot.lastIndexOf('.') + 1);
+        return switch (slot.toLowerCase(java.util.Locale.ROOT)) {
+            case "red" -> ChatColor.RED;
+            case "blue" -> ChatColor.BLUE;
+            case "green" -> ChatColor.DARK_GREEN;
+            case "lime" -> ChatColor.GREEN;
+            case "yellow" -> ChatColor.YELLOW;
+            case "purple" -> ChatColor.DARK_PURPLE;
+            case "pink" -> ChatColor.LIGHT_PURPLE;
+            case "orange", "gold" -> ChatColor.GOLD;
+            case "aqua", "cyan" -> ChatColor.AQUA;
+            case "gray", "grey" -> ChatColor.GRAY;
+            default -> {
+                try {
+                    yield ChatColor.valueOf(slot.toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException e) {
+                    yield ChatColor.WHITE;
+                }
+            }
+        };
     }
 
     private void clear(Player player) {
@@ -143,26 +214,36 @@ public final class ScoreboardManager implements Listener {
         }
     }
 
-    /** A unique, invisible per-slot entry name built from colour codes. */
     private static String slotToken(int index) {
         ChatColor[] palette = ChatColor.values();
         return palette[index % palette.length].toString() + ChatColor.RESET;
     }
 
+    private static me.playbosswar.tea.core.api.platform.Scoreboards scoreboards() {
+        return me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().scoreboards();
+    }
+
+    private static String fitTitle(String title) {
+        int max = scoreboards().maxTitleLength();
+        return title.length() <= max ? title : title.substring(0, max);
+    }
+
     private static void setLine(Team team, String line) {
-        if (line.length() <= 64) {
+        int max = scoreboards().maxAffixLength();
+        if (line.length() <= max) {
             team.setPrefix(line);
             team.setSuffix("");
             return;
         }
         // Split across prefix/suffix and carry the trailing colour over so the
-        // second half keeps its formatting.
-        String prefix = line.substring(0, 64);
-        String suffix = line.substring(64);
-        if (suffix.length() > 48)
-            suffix = suffix.substring(0, 48);
+        // second half keeps its formatting. Don't split a colour code.
+        int cut = line.charAt(max - 1) == ChatColor.COLOR_CHAR ? max - 1 : max;
+        String prefix = line.substring(0, cut);
+        String suffix = ChatColor.getLastColors(prefix) + line.substring(cut);
+        if (suffix.length() > max)
+            suffix = suffix.substring(0, max);
         team.setPrefix(prefix);
-        team.setSuffix(ChatColor.getLastColors(prefix) + suffix);
+        team.setSuffix(suffix);
     }
 
     @EventHandler

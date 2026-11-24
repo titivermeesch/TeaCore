@@ -19,15 +19,12 @@ import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-/**
- * Handles {@code /tea map ...} subcommands. Dispatched by {@link TeaCommand}.
- */
 public final class TeaMapCommand {
 
     static final List<String> SUBCOMMANDS = List.of(
             "create", "edit", "pos1", "pos2", "waiting", "addspawn", "clearspawns",
             "status", "board", "removeextension", "displayname",
-            "min", "max", "save", "discard", "list", "info", "reload", "delete", "help");
+            "min", "max", "save", "discard", "list", "info", "reload", "delete", "history", "restore", "import", "help");
 
     private final TeaCorePlugin plugin;
 
@@ -37,8 +34,6 @@ public final class TeaMapCommand {
 
     public void handle(CommandSender sender, String[] args) {
         if (args.length == 0) {
-            // The bare `/tea map` invocation shows the structured help block
-            // rather than a single cramped usage line.
             showHelp(sender);
             return;
         }
@@ -63,6 +58,9 @@ public final class TeaMapCommand {
             case "info" -> info(sender, args);
             case "reload" -> reload(sender);
             case "delete" -> delete(sender, args);
+            case "history" -> history(sender, args);
+            case "restore" -> restore(sender, args);
+            case "import" -> importMap(sender, args);
             default -> runExtensionSubcommand(sender, args);
         }
     }
@@ -89,6 +87,8 @@ public final class TeaMapCommand {
         ms.sendToSender(sender, "core.map.help.info");
         ms.sendToSender(sender, "core.map.help.reload");
         ms.sendToSender(sender, "core.map.help.delete");
+        ms.sendToSender(sender, "core.map.help.history");
+        ms.sendToSender(sender, "core.map.help.restore");
         ms.sendToSender(sender, "core.map.help.hint-extensions");
     }
 
@@ -99,7 +99,11 @@ public final class TeaMapCommand {
             for (String s : SUBCOMMANDS)
                 if (s.startsWith(p))
                     out.add(s);
+            MapDraft draft = sender instanceof Player pl
+                    ? plugin.mapEditingService().currentDraft(pl).orElse(null) : null;
             for (MapExtension<?> ext : plugin.maps().extensions().all()) {
+                if (draft != null && !ext.appliesTo(draft.gameId()))
+                    continue;
                 String sub = ext.subcommand().toLowerCase(Locale.ROOT);
                 if (sub.startsWith(p))
                     out.add(sub);
@@ -110,7 +114,9 @@ public final class TeaMapCommand {
                 || args[0].equalsIgnoreCase("edit")
                 || args[0].equalsIgnoreCase("list")
                 || args[0].equalsIgnoreCase("info")
-                || args[0].equalsIgnoreCase("delete"))) {
+                || args[0].equalsIgnoreCase("delete")
+                || args[0].equalsIgnoreCase("history")
+                || args[0].equalsIgnoreCase("restore"))) {
             return plugin.games().all().stream()
                     .map(d -> d.id().value())
                     .filter(s -> s.startsWith(args[1]))
@@ -118,7 +124,9 @@ public final class TeaMapCommand {
         }
         if (args.length == 3 && (args[0].equalsIgnoreCase("edit")
                 || args[0].equalsIgnoreCase("info")
-                || args[0].equalsIgnoreCase("delete"))) {
+                || args[0].equalsIgnoreCase("delete")
+                || args[0].equalsIgnoreCase("history")
+                || args[0].equalsIgnoreCase("restore"))) {
             try {
                 GameId g = GameId.of(args[1]);
                 return plugin.maps().forGame(g).stream()
@@ -143,6 +151,11 @@ public final class TeaMapCommand {
         }
         if (args.length < 3) {
             plugin.messageService().sendToSender(sender, "core.map.create.usage");
+            return;
+        }
+        if (plugin.arenas().arenaOf(player.getUniqueId()).isPresent()) {
+            // The editor world can't be entered from a match; the draft would be stuck.
+            plugin.messageService().send(player, "core.map.leave-arena-first");
             return;
         }
         GameId gameId = GameId.of(args[1]);
@@ -172,6 +185,11 @@ public final class TeaMapCommand {
         }
         if (args.length < 3) {
             plugin.messageService().sendToSender(sender, "core.map.edit.usage");
+            return;
+        }
+        if (plugin.arenas().arenaOf(player.getUniqueId()).isPresent()) {
+            // The editor world can't be entered from a match; the draft would be stuck.
+            plugin.messageService().send(player, "core.map.leave-arena-first");
             return;
         }
         GameId gameId = GameId.of(args[1]);
@@ -249,6 +267,11 @@ public final class TeaMapCommand {
         MapDraft draft = requireDraftInEditWorld(player);
         if (draft == null)
             return;
+        if (!ext.appliesTo(draft.gameId())) {
+            plugin.messageService().send(player, "core.map.extension.other-game",
+                    Map.of("id", ext.key().id(), "game", draft.gameId().value()));
+            return;
+        }
         String[] tail = new String[args.length - 1];
         System.arraycopy(args, 1, tail, 0, tail.length);
         try {
@@ -285,8 +308,6 @@ public final class TeaMapCommand {
                     Map.of("map", draft.mapId()));
             return;
         }
-        // Re-join all trailing args so the admin can include spaces without
-        // having to wrap the value in quotes.
         StringBuilder sb = new StringBuilder();
         for (int i = 1; i < args.length; i++) {
             if (i > 1)
@@ -332,8 +353,6 @@ public final class TeaMapCommand {
         MessageService ms = plugin.messageService();
         ms.send(player, "core.map.status.header",
                 Map.of("game", draft.gameId().value(), "map", draft.mapId()));
-        // Pull the missing-fields set so each row can render with a green check
-        // for satisfied fields or a red mark for ones still to author.
         java.util.Set<String> missingSet = new java.util.HashSet<>(plugin.mapEditingService().validateDraft(player));
         sendStatusEntry(player, "pos1", !missingSet.contains("pos1"),
                 draft.pos1().map(l -> format(l.getX()) + "/" + format(l.getY()) + "/" + format(l.getZ()))
@@ -346,10 +365,9 @@ public final class TeaMapCommand {
                         .orElse(null));
         sendStatusEntry(player, "participant-spawns", !missingSet.contains("participant-spawns"),
                 draft.participantSpawns().isEmpty() ? null : String.valueOf(draft.participantSpawns().size()));
-        // display-name is always optional, so render the row green when set and
-        // muted (not "missing") when not - never as a save-blocker.
+        // display-name is optional: show it muted when unset, never as a save blocker.
         sendStatusEntry(player, "display-name", true, draft.displayName().orElse(null));
-        for (MapExtension<?> ext : plugin.maps().extensions().all()) {
+        for (MapExtension<?> ext : plugin.mapEditingService().extensionsFor(draft.gameId())) {
             Object value = draft.extensions().get(ext.key().id());
             boolean satisfied = !missingSet.contains("extension:" + ext.key().id());
             sendStatusEntry(player, ext.statusLabel(), satisfied,
@@ -366,11 +384,6 @@ public final class TeaMapCommand {
         }
     }
 
-    /**
-     * Renders a single status row. Satisfied rows use the green-check entry
-     * key; missing required rows use the red-mark variant; an unset optional
-     * row falls back to the muted variant so it doesn't read as a save blocker.
-     */
     private void sendStatusEntry(Player player, String field, boolean satisfied, String value) {
         MessageService ms = plugin.messageService();
         if (value != null) {
@@ -385,10 +398,6 @@ public final class TeaMapCommand {
         }
     }
 
-    /**
-     * Toggles the map-setup sidebar for the player's current authoring session.
-     * Defaults on when a draft starts; this lets an admin hide it.
-     */
     private void board(CommandSender sender) {
         if (!(sender instanceof Player player)) {
             plugin.messageService().sendToSender(sender, "core.command.player-only");
@@ -588,12 +597,110 @@ public final class TeaMapCommand {
         }
         GameId g = GameId.of(args[1]);
         try {
-            plugin.mapEditingService().delete(g, args[2]);
+            plugin.mapEditingService().delete(g, args[2].toLowerCase(Locale.ROOT), sender.getName());
             plugin.messageService().sendToSender(sender, "core.map.delete.done",
                     Map.of("game", g.value(), "map", args[2]));
         } catch (Exception e) {
             plugin.messageService().sendToSender(sender, "core.map.delete.failed",
                     Map.of("reason", reasonOf(e)));
+        }
+    }
+
+    private void history(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.map.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        if (args.length < 3) {
+            ms.sendToSender(sender, "core.map.history.usage");
+            return;
+        }
+        GameId g = GameId.of(args[1]);
+        String map = args[2].toLowerCase(Locale.ROOT);
+        Map<String, String> base = Map.of("game", g.value(), "map", map);
+        List<me.playbosswar.tea.core.impl.map.MapBackups.Version> versions;
+        try {
+            versions = plugin.mapEditingService().backups().list(g, map);
+        } catch (IllegalArgumentException e) {
+            versions = List.of();
+        }
+        if (versions.isEmpty()) {
+            ms.sendToSender(sender, "core.map.history.none", base);
+            return;
+        }
+        ms.sendToSender(sender, "core.map.history.header", base);
+        java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd HH:mm").withZone(java.time.ZoneId.systemDefault());
+        for (var v : versions) {
+            ms.sendToSender(sender, "core.map.history.line", Map.of("n", String.valueOf(v.number()),
+                    "when", fmt.format(v.when()), "actor", v.actor(), "reason", v.reason()));
+        }
+        ms.sendToSender(sender, "core.map.history.hint", Map.of("game", g.value(), "map", map, "n", "1"));
+    }
+
+    private void importMap(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.map.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        if (args.length < 5) {
+            ms.sendToSender(sender, "core.map.import.usage");
+            return;
+        }
+        GameId g = GameId.of(args[1]);
+        String map = args[2].toLowerCase(Locale.ROOT);
+        String pointsName = args[4].replaceAll("[^A-Za-z0-9_.-]", "");
+        java.io.File points = new java.io.File(new java.io.File(plugin.getDataFolder(), "imports"),
+                pointsName.endsWith(".yml") ? pointsName : pointsName + ".yml");
+        if (!points.isFile()) {
+            ms.sendToSender(sender, "core.map.import.failed", Map.of("reason", "no points file " + points.getName()
+                    + " in plugins/TeaCore/imports"));
+            return;
+        }
+        try {
+            if (plugin.mapEditingService().backups() != null) {
+                plugin.mapEditingService().backups().snapshot(g, map, sender.getName(), "import");
+            }
+            var importer = new me.playbosswar.tea.core.impl.map.MapImporter(plugin.mapPersistence(), plugin.getLogger());
+            var result = importer.importWorld(g, map, args[3], points);
+            plugin.reloadMaps();
+            me.playbosswar.tea.core.impl.map.MapChanges.changed();
+            ms.sendToSender(sender, "core.map.import.done", Map.of("game", g.value(), "map", map,
+                    "size", result.size()[0] + "x" + result.size()[1] + "x" + result.size()[2]));
+        } catch (Exception e) {
+            ms.sendToSender(sender, "core.map.import.failed", Map.of("reason", reasonOf(e)));
+        }
+    }
+
+    private void restore(CommandSender sender, String[] args) {
+        MessageService ms = plugin.messageService();
+        if (!sender.hasPermission("tea.map.admin")) {
+            ms.sendToSender(sender, "core.command.no-permission");
+            return;
+        }
+        int n;
+        try {
+            n = Integer.parseInt(args.length < 4 ? "" : args[3]);
+        } catch (NumberFormatException e) {
+            ms.sendToSender(sender, "core.map.restore.usage");
+            return;
+        }
+        GameId g = GameId.of(args[1]);
+        String map = args[2].toLowerCase(Locale.ROOT);
+        Map<String, String> values = Map.of("game", g.value(), "map", map, "n", String.valueOf(n));
+        try {
+            plugin.mapEditingService().restore(g, map, n, sender.getName());
+            ms.sendToSender(sender, "core.map.restore.done", values);
+            plugin.discordEvents().staff(sender.getName(), "restored map " + g.value() + "/" + map + " to version #" + n);
+        } catch (IllegalStateException e) {
+            ms.sendToSender(sender, "editing".equals(e.getMessage())
+                    ? "core.map.restore.editing" : "core.map.restore.no-version", values);
+        } catch (IllegalArgumentException e) {
+            ms.sendToSender(sender, "core.map.restore.no-version", values);
+        } catch (Exception e) {
+            ms.sendToSender(sender, "core.map.restore.failed", Map.of("reason", reasonOf(e)));
         }
     }
 

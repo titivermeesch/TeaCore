@@ -1,20 +1,6 @@
-// Thin fetch wrapper that carries the admin token TeaCore issued. The token is
-// typed in once on the login screen and persisted in localStorage; it is added
-// as a Bearer header on every API call and as a query param on the WebSocket
-// handshake (browsers cannot set headers on WS upgrades).
-const TOKEN_KEY = 'tea.admin.token';
-
-export function getToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string) {
-    localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken() {
-    localStorage.removeItem(TOKEN_KEY);
-}
+// Thin fetch wrapper. Sign-in sets an HttpOnly session cookie, which the
+// browser sends on every API call and on the WebSocket handshake, so no
+// token is ever stored in the page.
 
 export class ApiError extends Error {
     constructor(public status: number, message: string) {
@@ -22,16 +8,16 @@ export class ApiError extends Error {
     }
 }
 
+/** Fired when the server says the session is gone; App shows the login page. */
+export const UNAUTHORIZED_EVENT = 'tea:unauthorized';
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const token = getToken();
     const headers = new Headers(init.headers);
-    if (token) headers.set('Authorization', `Bearer ${token}`);
     headers.set('Accept', 'application/json');
 
-    const res = await fetch(path, { ...init, headers });
-    if (res.status === 401) {
-        clearToken();
-        throw new ApiError(401, 'unauthorized');
+    const res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
+    if (res.status === 401 && !path.startsWith('/api/auth/')) {
+        window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
     if (!res.ok) {
         // Try to surface server-sent {"error":"..."} bodies.
@@ -63,7 +49,6 @@ export function apiDelete<T>(path: string) {
 }
 
 export function wsUrl(path: string): string {
-    const token = getToken() ?? '';
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${scheme}://${location.host}${path}?token=${encodeURIComponent(token)}`;
+    return `${scheme}://${location.host}${path}`;
 }

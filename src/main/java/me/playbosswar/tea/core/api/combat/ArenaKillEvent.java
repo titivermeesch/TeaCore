@@ -23,7 +23,6 @@ public final class ArenaKillEvent extends Event {
         this.credit = credit;
     }
 
-    /** The arena the death happened in. */
     public Arena arena() {
         return arena;
     }
