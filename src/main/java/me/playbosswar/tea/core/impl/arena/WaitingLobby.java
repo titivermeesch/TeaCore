@@ -121,6 +121,24 @@ public final class WaitingLobby implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onState(ArenaStateChangeEvent event) {
         if (isWaiting(event.to())) {
+            if (event.from() == ArenaState.STARTING && event.to() != ArenaState.STARTING) {
+                // Back from a called-off start: games clear the inventory when the match begins.
+                Arena arena = event.arena();
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    for (var uuid : arena.players()) {
+                        Player player = Bukkit.getPlayer(uuid);
+                        if (player == null || !player.isOnline()) {
+                            continue;
+                        }
+                        if (wantsKitItem(arena)) {
+                            giveItem(player);
+                        }
+                        if (wantsLeaveItem(arena)) {
+                            giveLeaveItem(player);
+                        }
+                    }
+                }, 2L);
+            }
             return;
         }
         for (var uuid : event.arena().players()) {
