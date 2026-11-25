@@ -1,6 +1,7 @@
 package me.playbosswar.tea.core.impl.settings;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -120,5 +121,16 @@ class YamlPatcherTest {
         assertThat(YamlPatcher.stripComment("\"a # b\"  # c")).isEqualTo("\"a # b\"");
         assertThat(YamlPatcher.stripComment("red#1")).isEqualTo("red#1");
         assertThat(YamlPatcher.stripComment("600   # ten")).isEqualTo("600");
+    }
+
+    @Test
+    void loadRejectsGlobalTags() {
+        assertThatThrownBy(() -> YamlPatcher.load("!!java.net.URL [\"http://x\"]"))
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> YamlPatcher.load("a: !!javax.script.ScriptEngineManager []"))
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> SafeYaml.create().load("!!java.net.URL [\"http://x\"]"))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(YamlPatcher.load("a: 1\nb: [x, y]")).isEqualTo(Map.of("a", 1, "b", List.of("x", "y")));
     }
 }

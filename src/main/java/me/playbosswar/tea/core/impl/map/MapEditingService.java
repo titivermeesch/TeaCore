@@ -399,7 +399,7 @@ public final class MapEditingService {
         WorldCreator creator = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().worlds().voidWorld(name)
                 .environment(World.Environment.NORMAL)
                 .generateStructures(false);
-        World world = creator.createWorld();
+        World world = me.playbosswar.tea.core.impl.arena.ArenaWorlds.create(creator);
         if (world == null)
             throw new IllegalStateException("Failed to create edit world " + name);
         world.setSpawnLocation(MapOrigin.X, MapOrigin.Y, MapOrigin.Z);

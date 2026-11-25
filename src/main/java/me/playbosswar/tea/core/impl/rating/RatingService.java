@@ -107,7 +107,7 @@ public final class RatingService implements Listener {
         return uuid + "|" + game.value();
     }
 
-    /** Returns the start rating until loaded and starts a background load. */
+    /** Returns the start rating until loaded and starts a background load. Display and matchmaking only. */
     public Rating get(UUID uuid, GameId game) {
         Rating r = ratings.getIfPresent(key(uuid, game));
         if (r != null) {
@@ -118,8 +118,14 @@ public final class RatingService implements Listener {
     }
 
     public void load(UUID uuid, GameId game) {
+        if (ratings.getIfPresent(key(uuid, game)) == null) {
+            reload(uuid, game);
+        }
+    }
+
+    private void reload(UUID uuid, GameId game) {
         String k = key(uuid, game);
-        if (ratings.getIfPresent(k) != null || loading.putIfAbsent(k, Boolean.TRUE) != null) {
+        if (loading.putIfAbsent(k, Boolean.TRUE) != null) {
             return;
         }
         writer.execute(() -> {
@@ -149,42 +155,49 @@ public final class RatingService implements Listener {
         return new Rating(start(), 0, 0, 0);
     }
 
-    private void write(UUID uuid, String name, GameId game, Rating r) {
-        writer.execute(() -> {
-            try (Connection c = dataSource.getConnection()) {
-                int updated;
-                try (PreparedStatement up = c.prepareStatement("UPDATE tea_ratings SET player_name = ?, rating = ?, "
-                        + "games = ?, wins = ?, losses = ?, updated_at = ? WHERE player_uuid = ? AND game_id = ?")) {
-                    up.setString(1, name);
-                    up.setInt(2, r.rating());
-                    up.setInt(3, r.games());
-                    up.setInt(4, r.wins());
-                    up.setInt(5, r.losses());
-                    up.setLong(6, System.currentTimeMillis());
-                    up.setString(7, uuid.toString());
-                    up.setString(8, game.value());
-                    updated = up.executeUpdate();
+    /**
+     * Adds a match result to the stored row instead of writing absolute values,
+     * so a result from another server since this one last read the row is kept.
+     */
+    private void applyResult(Connection c, UUID uuid, String name, GameId game, int delta, boolean won, boolean lost)
+            throws SQLException {
+        long now = System.currentTimeMillis();
+        String update = "UPDATE tea_ratings SET player_name = ?, "
+                + "rating = CASE WHEN rating + ? < 0 THEN 0 ELSE rating + ? END, games = games + 1, "
+                + "wins = wins + ?, losses = losses + ?, updated_at = ? WHERE player_uuid = ? AND game_id = ?";
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try (PreparedStatement up = c.prepareStatement(update)) {
+                up.setString(1, name);
+                up.setInt(2, delta);
+                up.setInt(3, delta);
+                up.setInt(4, won ? 1 : 0);
+                up.setInt(5, lost ? 1 : 0);
+                up.setLong(6, now);
+                up.setString(7, uuid.toString());
+                up.setString(8, game.value());
+                if (up.executeUpdate() > 0) {
+                    return;
                 }
-                if (updated == 0) {
-                    try (PreparedStatement ins = c.prepareStatement("INSERT INTO tea_ratings (player_uuid, game_id, "
-                            + "player_name, rating, games, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
-                        ins.setString(1, uuid.toString());
-                        ins.setString(2, game.value());
-                        ins.setString(3, name);
-                        ins.setInt(4, r.rating());
-                        ins.setInt(5, r.games());
-                        ins.setInt(6, r.wins());
-                        ins.setInt(7, r.losses());
-                        ins.setLong(8, System.currentTimeMillis());
-                        ins.executeUpdate();
-                    }
-                }
-                boards.invalidateAll();
-                ranks.invalidateAll();
-            } catch (SQLException e) {
-                logger.log(Level.WARNING, "Could not save rating of " + uuid, e);
             }
-        });
+            try (PreparedStatement ins = c.prepareStatement("INSERT INTO tea_ratings (player_uuid, game_id, "
+                    + "player_name, rating, games, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                ins.setString(1, uuid.toString());
+                ins.setString(2, game.value());
+                ins.setString(3, name);
+                ins.setInt(4, Math.max(0, start() + delta));
+                ins.setInt(5, 1);
+                ins.setInt(6, won ? 1 : 0);
+                ins.setInt(7, lost ? 1 : 0);
+                ins.setLong(8, now);
+                ins.executeUpdate();
+                return;
+            } catch (SQLException duplicate) {
+                // Another server inserted the row first; the second pass updates it.
+                if (attempt == 1) {
+                    throw duplicate;
+                }
+            }
+        }
     }
 
     /** Blocking; cached for 30 s. */
@@ -323,13 +336,17 @@ public final class RatingService implements Listener {
         java.util.Set<GameId> games = new java.util.HashSet<>(core.coordination().allHostedGames());
         core.games().all().forEach(d -> games.add(d.id()));
         for (GameId game : games) {
-            load(uuid, game);
+            reload(uuid, game);
         }
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        intents.remove(event.getPlayer().getUniqueId());
+        UUID uuid = event.getPlayer().getUniqueId();
+        intents.remove(uuid);
+        String prefix = uuid + "|";
+        ratings.asMap().keySet().removeIf(k -> k.startsWith(prefix));
+        ranks.asMap().keySet().removeIf(k -> k.startsWith(prefix));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -364,11 +381,23 @@ public final class RatingService implements Listener {
         if (sides.size() < 2) {
             return;
         }
-        Map<UUID, Integer> before = new HashMap<>();
+        java.util.Set<UUID> present = new java.util.HashSet<>(arena.players());
+        Map<UUID, String> names = new HashMap<>();
         for (UUID uuid : lineup.keySet()) {
-            before.put(uuid, get(uuid, game).rating());
+            names.put(uuid, Optional.ofNullable(Bukkit.getOfflinePlayer(uuid).getName())
+                    .orElse(uuid.toString().substring(0, 8)));
         }
         int k = kFactor();
+        writer.execute(() -> settle(game, lineup, sides, winningSide, present, names, k));
+    }
+
+    /** Runs on the writer thread: reads the stored ratings, then adds the result to each row. */
+    private void settle(GameId game, Map<UUID, String> lineup, Map<String, List<UUID>> sides, String winningSide,
+                        java.util.Set<UUID> present, Map<UUID, String> names, int k) {
+        Map<UUID, Integer> before = new HashMap<>();
+        for (UUID uuid : lineup.keySet()) {
+            before.put(uuid, read(uuid, game).rating());
+        }
         Map<UUID, Integer> deltas = new HashMap<>();
         for (Map.Entry<String, List<UUID>> side : sides.entrySet()) {
             double mine = side.getValue().stream().mapToInt(before::get).average().orElse(start());
@@ -378,27 +407,38 @@ public final class RatingService implements Listener {
             double score = winningSide == null ? 0.5 : side.getKey().equals(winningSide) ? 1.0 : 0.0;
             for (UUID uuid : side.getValue()) {
                 // Leaving before the end counts as a loss.
-                double s = arena.players().contains(uuid) ? score : 0.0;
+                double s = present.contains(uuid) ? score : 0.0;
                 deltas.put(uuid, (int) Math.round(k * (s - expected)));
             }
         }
+        Map<UUID, Rating> after = new HashMap<>();
         for (Map.Entry<UUID, Integer> e : deltas.entrySet()) {
             UUID uuid = e.getKey();
-            Rating old = get(uuid, game);
             boolean won = e.getValue() > 0 && winningSide != null;
             boolean lost = winningSide != null && !won;
-            Rating updated = new Rating(Math.max(0, old.rating() + e.getValue()), old.games() + 1,
-                    old.wins() + (won ? 1 : 0), old.losses() + (lost ? 1 : 0));
+            try (Connection c = dataSource.getConnection()) {
+                applyResult(c, uuid, names.get(uuid), game, e.getValue(), won, lost);
+            } catch (SQLException ex) {
+                logger.log(Level.WARNING, "Could not save rating of " + uuid, ex);
+                continue;
+            }
+            Rating updated = read(uuid, game);
             ratings.put(key(uuid, game), updated);
-            String name = Optional.ofNullable(Bukkit.getOfflinePlayer(uuid).getName()).orElse(uuid.toString().substring(0, 8));
-            write(uuid, name, game, updated);
+            after.put(uuid, updated);
+        }
+        boards.invalidateAll();
+        ranks.invalidateAll();
+        if (!plugin.isEnabled()) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> after.forEach((uuid, updated) -> {
             Player p = Bukkit.getPlayer(uuid);
             if (p != null) {
-                int d = e.getValue();
+                int d = deltas.get(uuid);
                 core.messageService().send(p, d >= 0 ? "core.ranked.gained" : "core.ranked.lost", Map.of(
                         "change", String.valueOf(Math.abs(d)), "rating", String.valueOf(updated.rating())));
             }
-        }
+        }));
     }
 
 }

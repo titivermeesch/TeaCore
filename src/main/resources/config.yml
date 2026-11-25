@@ -12,6 +12,10 @@ network:
   # Settings can be changed for one group of servers. Empty means lobby on a
   # server with lobby.enabled: true, else arena.
   group: ""
+  # Servers sign the messages they send each other through Redis with a shared
+  # secret. The first server generates it and stores it in the MySQL database,
+  # so leave this unset unless the servers don't share a database.
+  # secret: ""
 
 redis:
   host: localhost
@@ -258,8 +262,9 @@ dashboard:
   # each show the same data and each have their own admin token. Operators
   # running multiple lobbies should pick one canonical lobby for the dashboard.
   enabled: false
-  # "0.0.0.0" to bind all interfaces, "127.0.0.1" to restrict to localhost.
-  bind-address: "0.0.0.0"
+  # Only reachable from this machine by default. Put a reverse proxy in front
+  # of it, or set "0.0.0.0" to listen on every interface.
+  bind-address: "127.0.0.1"
   port: 8080
   # Players sign in with /tea dashboard login (permission tea.dashboard.view),
   # which gives them a one-time link. Set this to the address players open

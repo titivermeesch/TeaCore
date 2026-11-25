@@ -46,12 +46,8 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
     private final Items items = new XItems((type, amount) -> {
         ItemStack item = new ItemStack(org.bukkit.Material.POTION, amount);
         if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
-            try {
-                meta.setBasePotionType(org.bukkit.potion.PotionType.valueOf(type));
-                item.setItemMeta(meta);
-            } catch (IllegalArgumentException | NoSuchMethodError e) {
-                return null;
-            }
+            if (!OldApis.setPotion(meta, type)) return null;
+            item.setItemMeta(meta);
         }
         return item;
     });
@@ -74,7 +70,7 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
         return switch (feature) {
             case TEXT_DISPLAYS -> version.atLeast(19, 4);
             case OFF_HAND, ATTACK_COOLDOWN, EFFECT_CLOUDS -> true;
-            case HEX_COLORS -> version.atLeast(16);
+            case HEX_COLORS -> true;
             case NEGATIVE_WORLD_HEIGHT -> version.atLeast(18);
             case PARTICLE_OPTIONS -> true;
         };
@@ -123,12 +119,8 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
 
         /** Also reads marks older TeaCore versions stored as other types. */
         private String read(org.bukkit.persistence.PersistentDataContainer pdc, NamespacedKey key) {
-            if (!pdc.has(key)) return null;
-            try {
-                return pdc.get(key, PersistentDataType.STRING);
-            } catch (IllegalArgumentException otherType) {
-                return "1";
-            }
+            if (pdc.has(key, PersistentDataType.STRING)) return pdc.get(key, PersistentDataType.STRING);
+            return pdc.has(key, PersistentDataType.BYTE) || pdc.has(key, PersistentDataType.INTEGER) ? "1" : null;
         }
     };
 
@@ -141,7 +133,7 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
             if (!supports(Feature.TEXT_DISPLAYS)) {
                 return new StandHologram(location, lines);
             }
-            TextDisplay display = location.getWorld().spawn(location, TextDisplay.class, d -> {
+            TextDisplay display = OldApis.spawn(location.getWorld(), location, TextDisplay.class, d -> {
                 d.setBillboard(Display.Billboard.CENTER);
                 d.setPersistent(false);
                 d.setShadowed(true);
@@ -258,13 +250,15 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
     @Override public Sounds sounds() { return sounds; }
 
     private final Worlds worlds = new Worlds() {
-        @Override public int minHeight(World world) { return world.getMinHeight(); }
+        @Override public int minHeight(World world) { return version.atLeast(17) ? world.getMinHeight() : 0; }
         @Override public int maxHeight(World world) { return world.getMaxHeight(); }
         @Override public void explode(Location at, float power, boolean fire, boolean breakBlocks, Entity source) {
             at.getWorld().createExplosion(at, power, fire, breakBlocks, source);
         }
         @Override public boolean isChunkGenerated(World world, int x, int z) { return world.isChunkGenerated(x, z); }
-        @Override public boolean isAir(org.bukkit.ChunkSnapshot s, int x, int y, int z) { return s.getBlockType(x, y, z).isAir(); }
+        @Override public boolean isAir(org.bukkit.ChunkSnapshot s, int x, int y, int z) {
+            return s.getBlockType(x, y, z).isAir();
+        }
 
         @Override
         @SuppressWarnings({"unchecked", "rawtypes"})
@@ -277,7 +271,7 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
 
         @Override
         public WorldCreator voidWorld(String name) {
-            return new WorldCreator(name).generator(new ModernVoidGenerator());
+            return new WorldCreator(name).generator(version.atLeast(18) ? new ModernVoidGenerator() : new OldVoidGenerator());
         }
     };
 
@@ -305,8 +299,10 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
 
     private final me.playbosswar.tea.core.api.platform.Scoreboards scoreboards = new me.playbosswar.tea.core.api.platform.Scoreboards() {
         @Override
+        @SuppressWarnings("deprecation")
         public org.bukkit.scoreboard.Objective newObjective(org.bukkit.scoreboard.Scoreboard board, String name, String title) {
-            return board.registerNewObjective(name, org.bukkit.scoreboard.Criteria.DUMMY, title);
+            if (OldApis.hasCriteria()) return board.registerNewObjective(name, org.bukkit.scoreboard.Criteria.DUMMY, title);
+            return board.registerNewObjective(name, "dummy", title);
         }
 
         @Override
@@ -334,7 +330,7 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
 
     @Override public boolean isPassable(Block block) { return block.isPassable(); }
 
-    /** Armor-stand holograms for 1.13 - 1.19.3. */
+    /** Armor-stand holograms for 1.16.5 - 1.19.3. */
     private static final class StandHologram implements Holograms.Hologram {
         private final List<org.bukkit.entity.ArmorStand> stands = new ArrayList<>();
         private Location base;
@@ -350,7 +346,7 @@ public final class ModernPlatform implements Platform, me.playbosswar.tea.core.i
             for (int i = 0; i < lines.size(); i++) {
                 Location at = base.clone().add(0, (lines.size() - 1 - i) * 0.27, 0);
                 if (i >= stands.size()) {
-                    org.bukkit.entity.ArmorStand s = base.getWorld().spawn(at, org.bukkit.entity.ArmorStand.class, a -> {
+                    org.bukkit.entity.ArmorStand s = OldApis.spawn(base.getWorld(), at, org.bukkit.entity.ArmorStand.class, a -> {
                         a.setVisible(false);
                         a.setMarker(true);
                         a.setGravity(false);

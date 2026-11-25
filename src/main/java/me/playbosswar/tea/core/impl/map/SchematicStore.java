@@ -19,6 +19,11 @@ public interface SchematicStore {
 
     String unavailableReason();
 
+    /** Whether {@link #paste} may run off the main thread (FAWE); otherwise it uses the Bukkit API directly. */
+    default boolean pastesOffMainThread() {
+        return false;
+    }
+
     void paste(Path file, World world, int x, int y, int z) throws IOException;
 
     /** Saves the region; returns its min corner as {@code [x, y, z]}. */

@@ -2,11 +2,17 @@ package me.playbosswar.tea.core.impl.coordination;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import me.playbosswar.tea.core.api.arena.ArenaId;
 import me.playbosswar.tea.core.api.coordination.ArenaSnapshot;
 import me.playbosswar.tea.core.api.coordination.CoordinationBackend;
 import me.playbosswar.tea.core.api.coordination.QueueEntry;
@@ -39,7 +45,8 @@ public final class Matchmaker implements Listener {
     // Checked by the disconnect listener so a proxy hop doesn't lose its queue entry.
     private final ConcurrentHashMap<UUID, Instant> recentlyRouted = new ConcurrentHashMap<>();
     private static final Duration STALE_ROUTE = Duration.ofSeconds(30);
-    private BukkitTask task;
+    private volatile BukkitTask task;
+    private final AtomicBoolean collecting = new AtomicBoolean();
     private volatile me.playbosswar.tea.core.impl.rating.RatingService ratings;
 
     public void setRatings(me.playbosswar.tea.core.impl.rating.RatingService ratings) {
@@ -58,7 +65,7 @@ public final class Matchmaker implements Listener {
     public void start() {
         if (task != null)
             return;
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        task = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::collect, 20L, 20L);
     }
 
     /**
@@ -82,21 +89,39 @@ public final class Matchmaker implements Listener {
         }
     }
 
-    private void tick() {
-        // The lobby usually has no game plugin installed but still holds queued
-        // players, so also include games seen in cluster-wide arena snapshots.
-        Set<GameId> gameIds = new HashSet<>();
-        games.all().forEach(def -> gameIds.add(def.id()));
-        for (ArenaSnapshot snap : backend.allArenas()) gameIds.add(snap.gameId());
+    /** Async: reads the arenas and queues once, then routes on the main thread. */
+    private void collect() {
+        if (!collecting.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            // The lobby usually has no game plugin installed but still holds queued
+            // players, so also include games seen in cluster-wide arena snapshots.
+            List<ArenaSnapshot> arenas = List.copyOf(backend.allArenas());
+            Set<GameId> gameIds = new HashSet<>();
+            games.all().forEach(def -> gameIds.add(def.id()));
+            for (ArenaSnapshot snap : arenas) gameIds.add(snap.gameId());
 
-        for (GameId gameId : gameIds) {
-            var queue = backend.queueFor(gameId);
-            if (queue.isEmpty()) continue;
-
-            plugin.getLogger().info("[mm] " + gameId.value() + ": " + queue.size() + " queued");
-            for (QueueEntry entry : queue) {
-                tryRoute(entry);
+            List<QueueEntry> queued = new ArrayList<>();
+            for (GameId gameId : gameIds) {
+                var queue = backend.queueFor(gameId);
+                if (queue.isEmpty()) continue;
+                plugin.getLogger().fine("[mm] " + gameId.value() + ": " + queue.size() + " queued");
+                queued.addAll(queue);
             }
+            if (!queued.isEmpty() && plugin.isEnabled()) {
+                Bukkit.getScheduler().runTask(plugin, () -> route(queued, arenas));
+            }
+        } finally {
+            collecting.set(false);
+        }
+    }
+
+    private void route(List<QueueEntry> queued, List<ArenaSnapshot> arenas) {
+        if (task == null) return;
+        Map<ArenaId, Integer> reserved = new HashMap<>();
+        for (QueueEntry entry : queued) {
+            tryRoute(entry, arenas, reserved);
         }
     }
 
@@ -109,7 +134,7 @@ public final class Matchmaker implements Listener {
         Player player = event.getPlayer();
         QueueEntry entry = backend.queueEntryOf(player.getUniqueId()).orElse(null);
         if (entry == null) return;
-        Optional<ArenaSnapshot> picked = pickArena(entry);
+        Optional<ArenaSnapshot> picked = pickArena(entry, List.copyOf(backend.allArenas()), Map.of());
         if (picked.isEmpty()) return;
         ArenaSnapshot snapshot = picked.get();
         if (!snapshot.serverId().equals(backend.serverId())) return;
@@ -127,11 +152,16 @@ public final class Matchmaker implements Listener {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             Player player = event.getPlayer();
             if (!player.isOnline()) return;
-            backend.queueEntryOf(player.getUniqueId()).ifPresent(this::tryRoute);
+            backend.queueEntryOf(player.getUniqueId()).ifPresent(entry ->
+                    tryRoute(entry, List.copyOf(backend.allArenas()), new HashMap<>()));
         }, 1L);
     }
 
-    private void tryRoute(QueueEntry entry) {
+    /**
+     * @param arenas   read once per tick and shared by every entry in it
+     * @param reserved players routed to each arena earlier in the same tick, which {@code arenas} doesn't show yet
+     */
+    private void tryRoute(QueueEntry entry, List<ArenaSnapshot> arenas, Map<ArenaId, Integer> reserved) {
         Player player = Bukkit.getPlayer(entry.playerUuid());
         if (player == null) {
             // The destination server never picked the entry up (it dequeues on arrival),
@@ -144,7 +174,7 @@ public final class Matchmaker implements Listener {
                         + " never arrived after being routed; dequeueing");
                 return;
             }
-            plugin.getLogger().info("[mm]   " + entry.playerName() + "/" + entry.playerUuid()
+            plugin.getLogger().fine("[mm]   " + entry.playerName() + "/" + entry.playerUuid()
                     + " not local on this server (server-id=" + backend.serverId() + "); skipping");
             return;
         }
@@ -155,17 +185,20 @@ public final class Matchmaker implements Listener {
             return;
         }
 
-        Optional<ArenaSnapshot> target = pickArena(entry);
+        Optional<ArenaSnapshot> target = pickArena(entry, arenas, reserved);
         if (target.isEmpty()) {
-            long total = backend.allArenas().stream()
+            if (!plugin.getLogger().isLoggable(java.util.logging.Level.FINE)) {
+                return;
+            }
+            long total = arenas.stream()
                     .filter(s -> s.gameId().equals(entry.gameId())).count();
-            plugin.getLogger().info("[mm]   no available arena for " + player.getName()
+            plugin.getLogger().fine("[mm]   no available arena for " + player.getName()
                     + " (game=" + entry.gameId().value() + ", mapFilter=" + entry.mapIds()
                     + "); total snapshots for this game=" + total
                     + " — see snapshot dump below");
-            backend.allArenas().stream()
+            arenas.stream()
                     .filter(s -> s.gameId().equals(entry.gameId()))
-                    .forEach(s -> plugin.getLogger().info("[mm]     - arena "
+                    .forEach(s -> plugin.getLogger().fine("[mm]     - arena "
                             + s.arenaId().value().toString().substring(0, 8)
                             + " server=" + s.serverId()
                             + " state=" + s.state()
@@ -176,6 +209,7 @@ public final class Matchmaker implements Listener {
         }
 
         ArenaSnapshot snapshot = target.get();
+        reserved.merge(snapshot.arenaId(), Math.max(1, entry.partySize()), Integer::sum);
         if (entry.partyId() != null) {
             partyArenas.put(entry.partyId(), java.util.Map.entry(snapshot.arenaId(), Instant.now()));
         }
@@ -210,11 +244,12 @@ public final class Matchmaker implements Listener {
     private final ConcurrentHashMap<String, java.util.Map.Entry<me.playbosswar.tea.core.api.arena.ArenaId, Instant>>
             partyArenas = new ConcurrentHashMap<>();
 
-    private Optional<ArenaSnapshot> pickArena(QueueEntry entry) {
+    private Optional<ArenaSnapshot> pickArena(QueueEntry entry, List<ArenaSnapshot> arenas,
+                                              Map<ArenaId, Integer> reserved) {
         if (entry.partyId() != null) {
             var placed = partyArenas.get(entry.partyId());
             if (placed != null && Duration.between(placed.getValue(), Instant.now()).toSeconds() < 30) {
-                for (ArenaSnapshot snapshot : backend.allArenas()) {
+                for (ArenaSnapshot snapshot : arenas) {
                     if (snapshot.arenaId().equals(placed.getKey()) && snapshot.isAvailable()) {
                         return Optional.of(snapshot);
                     }
@@ -224,8 +259,9 @@ public final class Matchmaker implements Listener {
         int room = Math.max(1, entry.partySize());
         ArenaSnapshot best = null;
         int bestPlayers = -1;
-        for (ArenaSnapshot snapshot : backend.allArenas()) {
-            if (snapshot.players() + room > snapshot.maxPlayers())
+        for (ArenaSnapshot snapshot : arenas) {
+            int players = snapshot.players() + reserved.getOrDefault(snapshot.arenaId(), 0);
+            if (players + room > snapshot.maxPlayers())
                 continue;
             if (!snapshot.gameId().equals(entry.gameId()))
                 continue;
@@ -235,9 +271,9 @@ public final class Matchmaker implements Listener {
                 continue;
             if (!snapshot.acceptsRanked(entry.ranked(), entry.rating()))
                 continue;
-            if (snapshot.players() > bestPlayers) {
+            if (players > bestPlayers) {
                 best = snapshot;
-                bestPlayers = snapshot.players();
+                bestPlayers = players;
             }
         }
         return Optional.ofNullable(best);

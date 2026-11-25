@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.UUID;
 import me.playbosswar.tea.core.api.TeaCoreAPI;
 import me.playbosswar.tea.core.api.arena.Arena;
-import me.playbosswar.tea.core.api.coordination.QueueEntry;
 import me.playbosswar.tea.core.api.economy.EconomyService;
 import me.playbosswar.tea.core.api.placeholder.PlaceholderResolver;
 import me.playbosswar.tea.core.impl.stats.CoreStatsService;
@@ -21,14 +20,16 @@ public final class CorePlaceholders implements PlaceholderResolver {
     private final CoreStatsService coreStats;
     private final me.playbosswar.tea.core.impl.sidebar.ArenaValues arenaValues;
     private final LeaderboardCache leaderboards;
+    private final NetworkSnapshot network;
 
     public CorePlaceholders(TeaCoreAPI api, CoreStatsService coreStats,
                             me.playbosswar.tea.core.impl.sidebar.ArenaValues arenaValues,
-                            LeaderboardCache leaderboards) {
+                            LeaderboardCache leaderboards, NetworkSnapshot network) {
         this.api = api;
         this.coreStats = coreStats;
         this.arenaValues = arenaValues;
         this.leaderboards = leaderboards;
+        this.network = network;
     }
 
     @Override
@@ -41,8 +42,8 @@ public final class CorePlaceholders implements PlaceholderResolver {
             case "online" -> String.valueOf(Bukkit.getOnlinePlayers().size());
             case "game_count" -> String.valueOf(api.games().all().size());
             case "map_count" -> String.valueOf(api.maps().all().size());
-            case "arenas_total" -> String.valueOf(api.coordination().allArenas().size());
-            case "players_in_games" -> String.valueOf(api.coordination().allArenas().stream()
+            case "arenas_total" -> String.valueOf(network.arenas().size());
+            case "players_in_games" -> String.valueOf(network.arenas().stream()
                     .mapToInt(a -> a.players()).sum());
             default -> {
                 if (key.startsWith("top_")) {
@@ -125,7 +126,7 @@ public final class CorePlaceholders implements PlaceholderResolver {
                 continue;
             }
             String what = rest.substring(id.length() + 1);
-            var arenas = api.coordination().allArenas().stream().filter(a -> a.gameId().equals(def.id())).toList();
+            var arenas = network.arenas().stream().filter(a -> a.gameId().equals(def.id())).toList();
             if (what.equals("players")) {
                 return String.valueOf(arenas.stream().mapToInt(a -> a.players()).sum());
             }
@@ -137,7 +138,7 @@ public final class CorePlaceholders implements PlaceholderResolver {
                 return String.valueOf(arenas.stream().filter(a -> a.state().name().equals(state)).count());
             }
             if (what.equals("queue")) {
-                return String.valueOf(api.coordination().queueFor(def.id()).size());
+                return String.valueOf(network.queueSize(def.id()));
             }
             if (what.equals("maps")) {
                 return String.valueOf(api.maps().forGame(def.id()).size());
@@ -158,12 +159,12 @@ public final class CorePlaceholders implements PlaceholderResolver {
             case "displayname" -> displayName(player);
             case "balance" -> balance(uuid);
             case "balance_formatted" -> balanceFormatted(uuid);
-            case "wins" -> String.valueOf(coreStats.statsOf(uuid).wins());
-            case "losses" -> String.valueOf(coreStats.statsOf(uuid).losses());
-            case "games_played" -> String.valueOf(coreStats.statsOf(uuid).gamesPlayed());
-            case "kills" -> String.valueOf(coreStats.statsOf(uuid).kills());
-            case "deaths" -> String.valueOf(coreStats.statsOf(uuid).deaths());
-            case "assists" -> String.valueOf(coreStats.statsOf(uuid).assists());
+            case "wins" -> String.valueOf(coreStats.cachedStatsOf(uuid).wins());
+            case "losses" -> String.valueOf(coreStats.cachedStatsOf(uuid).losses());
+            case "games_played" -> String.valueOf(coreStats.cachedStatsOf(uuid).gamesPlayed());
+            case "kills" -> String.valueOf(coreStats.cachedStatsOf(uuid).kills());
+            case "deaths" -> String.valueOf(coreStats.cachedStatsOf(uuid).deaths());
+            case "assists" -> String.valueOf(coreStats.cachedStatsOf(uuid).assists());
             case "winrate" -> winRate(uuid);
             case "kdr" -> killDeathRatio(uuid);
             case "in_arena" -> String.valueOf(api.arenas().arenaOf(uuid).isPresent());
@@ -214,7 +215,9 @@ public final class CorePlaceholders implements PlaceholderResolver {
 
     private long unlocked(UUID uuid, me.playbosswar.tea.core.api.game.GameId game) {
         return achievementIds(game).stream()
-                .filter(id -> api.achievements().isUnlocked(uuid, game, id)).count();
+                .filter(id -> api.achievements() instanceof me.playbosswar.tea.core.impl.achievement.AchievementServiceImpl impl
+                        ? impl.isUnlockedCached(uuid, game, id)
+                        : api.achievements().isUnlocked(uuid, game, id)).count();
     }
 
     /** Also matches games this server doesn't run (their achievements are stored). */
@@ -276,7 +279,7 @@ public final class CorePlaceholders implements PlaceholderResolver {
     }
 
     private String winRate(UUID uuid) {
-        CoreStats stats = coreStats.statsOf(uuid);
+        CoreStats stats = coreStats.cachedStatsOf(uuid);
         if (stats.gamesPlayed() == 0) {
             return "0.0";
         }
@@ -284,7 +287,7 @@ public final class CorePlaceholders implements PlaceholderResolver {
     }
 
     private String killDeathRatio(UUID uuid) {
-        CoreStats stats = coreStats.statsOf(uuid);
+        CoreStats stats = coreStats.cachedStatsOf(uuid);
         int deaths = Math.max(1, stats.deaths());
         return String.format(Locale.ROOT, "%.2f", (double) stats.kills() / deaths);
     }
@@ -321,14 +324,14 @@ public final class CorePlaceholders implements PlaceholderResolver {
     }
 
     private String queue(UUID uuid, String key) {
-        QueueEntry entry = api.coordination().queueEntryOf(uuid).orElse(null);
-        if (entry == null) {
+        NetworkSnapshot.QueuePlace place = network.placeOf(uuid);
+        if (place == null) {
             return "";
         }
         return switch (key) {
-            case "queue_game" -> entry.gameId().value();
-            case "queue_position" -> String.valueOf(api.coordination().queuePosition(uuid, entry.gameId()) + 1);
-            case "queue_size" -> String.valueOf(api.coordination().queueFor(entry.gameId()).size());
+            case "queue_game" -> place.game().value();
+            case "queue_position" -> String.valueOf(place.position());
+            case "queue_size" -> String.valueOf(place.size());
             default -> "";
         };
     }

@@ -50,7 +50,8 @@ public final class MapImporter {
         World world = Bukkit.getWorld(worldName);
         boolean loadedHere = world == null;
         if (world == null) {
-            world = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().worlds().voidWorld(worldName).createWorld();
+            world = me.playbosswar.tea.core.impl.arena.ArenaWorlds.create(
+                    me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().worlds().voidWorld(worldName));
         }
         if (world == null) {
             throw new IOException("could not load world " + worldName);

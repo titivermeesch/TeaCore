@@ -20,6 +20,10 @@ import org.bukkit.scheduler.BukkitTask;
 
 public final class DashboardServer {
 
+    static final long MAX_BODY = 64L * 1024;
+    static final long MAX_UPLOAD_BODY = 300L * 1024 * 1024;
+    static final String UPLOAD_PATH = "/api/maps-upload";
+
     private final CoreConfig.DashboardConfig config;
     private final Logger logger;
     private final TeaCorePlugin plugin;
@@ -47,7 +51,8 @@ public final class DashboardServer {
         try {
             Javalin javalin = Javalin.create(cfg -> {
                 cfg.showJavalinBanner = false;
-                cfg.http.maxRequestSize = 300L * 1024 * 1024; // map zips
+                // Javalin has no per-route limit; limitBody holds other routes to MAX_BODY.
+                cfg.http.maxRequestSize = MAX_UPLOAD_BODY;
                 cfg.jetty.defaultHost = config.bindAddress();
                 cfg.jetty.defaultPort = config.port();
                 // spaRoot makes client-side-routed URLs (e.g. /arenas) fall back to index.html
@@ -67,6 +72,7 @@ public final class DashboardServer {
                 auth.setStaffSink(plugin.discordEvents()::staff);
             }
             javalin.before("/api/*", auth::authenticate);
+            javalin.before(DashboardServer::limitBody);
             auth.register(javalin);
 
             // Prometheus: off until metrics.token is set. Separate from the admin token so a
@@ -118,6 +124,27 @@ public final class DashboardServer {
             this.queueTicker = Bukkit.getScheduler().runTaskTimer(plugin, this::pushQueueCounts, 40L, 20L);
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Failed to start dashboard HTTP server", e);
+        }
+    }
+
+    /** Runs after authentication, so only a signed-in user who may upload maps gets the large limit. */
+    static void limitBody(io.javalin.http.Context ctx) {
+        long length = ctx.req().getContentLengthLong();
+        boolean chunked = ctx.header("Transfer-Encoding") != null;
+        if (length <= 0 && !chunked) {
+            return;
+        }
+        if (length < 0) {
+            ctx.status(HttpStatus.LENGTH_REQUIRED).json(Map.of("error", "Content-Length is required"));
+            ctx.skipRemainingHandlers();
+            return;
+        }
+        var session = DashboardAuth.session(ctx);
+        boolean upload = ctx.path().equals(UPLOAD_PATH) && session != null
+                && session.can(DashboardPermission.MAPS_TRANSFER);
+        if (length > (upload ? MAX_UPLOAD_BODY : MAX_BODY)) {
+            ctx.status(HttpStatus.CONTENT_TOO_LARGE).json(Map.of("error", "request body too large"));
+            ctx.skipRemainingHandlers();
         }
     }
 

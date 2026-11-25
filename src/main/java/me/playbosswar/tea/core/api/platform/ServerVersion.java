@@ -37,6 +37,14 @@ public record ServerVersion(int major, int minor, int patch) implements Comparab
         return !atLeast(13);
     }
 
+    /**
+     * 1.13 to 1.16.4 can't load Java 17 classes (their plugin class rewriter is too old),
+     * so Tea supports 1.8.8 to 1.12.2 and 1.16.5 onwards.
+     */
+    public boolean supported() {
+        return legacy() || atLeast(16, 5);
+    }
+
     @Override
     public int compareTo(ServerVersion o) {
         int c = Integer.compare(major, o.major);

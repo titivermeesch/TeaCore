@@ -69,13 +69,34 @@ public final class TeamManagerImpl implements TeamManager {
                 }
             }
         }
-        if (target == null) {
+        if (target == null || wouldLeaveOneSide(arena, teams, playerUuid)) {
             target = pickSmallest(teams.values());
         }
         if (target == null || !target.add(playerUuid)) {
             throw new IllegalStateException("No team slot available in arena " + arenaId);
         }
         return target;
+    }
+
+    /**
+     * Whether joining a party mate's team would put everyone on one team: the
+     * other teams are empty and every player still to be assigned is in the party.
+     */
+    private boolean wouldLeaveOneSide(Arena arena, LinkedHashMap<TeamId, TeamImpl> teams, UUID playerUuid) {
+        if (teams.size() < 2 || teams.values().stream().filter(t -> t.size() > 0).count() >= 2) {
+            return false;
+        }
+        java.util.Set<UUID> mates = partyMates.apply(playerUuid);
+        for (UUID other : arena.players()) {
+            if (other.equals(playerUuid) || mates.contains(other)) {
+                continue;
+            }
+            boolean assigned = teams.values().stream().anyMatch(t -> t.members().contains(other));
+            if (!assigned) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

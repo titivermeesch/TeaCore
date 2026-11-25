@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
 import java.util.Random;
@@ -27,20 +28,104 @@ class SharedFilesTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        db = new SQLiteDataSource();
-        db.setUrl("jdbc:sqlite:" + tmp.resolve("tea.db"));
-        String sql;
-        try (InputStream in = getClass().getClassLoader()
-                .getResourceAsStream("db/migrations/core/V013__shared_files.sql")) {
-            sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        try (Connection c = db.getConnection(); Statement s = c.createStatement()) {
-            for (String stmt : sql.replaceAll("(?m)^--.*$", "").split(";")) {
-                if (!stmt.isBlank()) {
-                    s.execute(stmt);
+        db = migrated("tea.db");
+    }
+
+    private SQLiteDataSource migrated(String fileName) throws Exception {
+        SQLiteDataSource db = new SQLiteDataSource();
+        db.setUrl("jdbc:sqlite:" + tmp.resolve(fileName));
+        for (String file : List.of("V013__shared_files.sql", "V016__file_chunk_touched.sql")) {
+            String sql;
+            try (InputStream in = getClass().getClassLoader().getResourceAsStream("db/migrations/core/" + file)) {
+                sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            try (Connection c = db.getConnection(); Statement s = c.createStatement()) {
+                for (String stmt : sql.replaceAll("(?m)^--.*$", "").split(";")) {
+                    if (!stmt.isBlank()) {
+                        s.execute(stmt);
+                    }
                 }
             }
         }
+        return db;
+    }
+
+    private void sql(String statement) throws Exception {
+        try (Connection c = db.getConnection(); Statement s = c.createStatement()) {
+            s.execute(statement);
+        }
+    }
+
+    private int chunkCount() throws Exception {
+        try (Connection c = db.getConnection(); Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT COUNT(*) FROM tea_file_chunks")) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    @Test
+    void movingToAnotherDatabaseKeepsLocalFiles() throws Exception {
+        write("a", "maps/fireball.yml", "local map\n");
+        server("a").pull();
+
+        db = migrated("shared.db");
+        write("b", "theme.yml", "from another server\n");
+        server("b").pull();
+
+        SharedFiles moved = server("a");
+        moved.pull();
+        assertThat(read("a", "maps/fireball.yml")).isEqualTo("local map\n");
+        assertThat(moved.push()).isTrue();
+    }
+
+    @Test
+    void contentLostAfterUploadIsRequestedAndUploadedAgain() throws Exception {
+        SharedFiles a = server("a");
+        write("a", "maps/fireball.yml", "v1\n");
+        a.pull();
+        write("a", "maps/fireball.yml", "v2\n");
+        assertThat(a.push()).isTrue();
+        a.takeAnnouncement();
+        sql("DELETE FROM tea_file_chunks");
+
+        write("b", "maps/fireball.yml", "v1\n");
+        SharedFiles b = server("b");
+        b.pull();
+        assertThat(read("b", "maps/fireball.yml")).isEqualTo("v1\n");
+        assertThat(b.takeAnnouncement()).isTrue();
+        b.pull();
+        assertThat(b.takeAnnouncement()).as("asks only once per hash").isFalse();
+
+        assertThat(a.push()).isTrue();
+        b.pull();
+        assertThat(read("b", "maps/fireball.yml")).isEqualTo("v2\n");
+    }
+
+    @Test
+    void pullUploadsMissingContentItHasLocally() throws Exception {
+        SharedFiles a = server("a");
+        write("a", "maps/fireball.yml", "v1\n");
+        a.pull();
+        sql("DELETE FROM tea_file_chunks");
+        a.pull();
+        assertThat(a.takeAnnouncement()).isTrue();
+        assertThat(server("b").pull()).containsExactly("maps/fireball.yml");
+    }
+
+    @Test
+    void cleanupKeepsFreshUnreferencedChunks() throws Exception {
+        SharedFiles a = server("a");
+        write("a", "maps/fireball.yml", "v1\n");
+        a.pull();
+        write("a", "maps/fireball.yml", "v2\n");
+        a.push();
+        assertThat(chunkCount()).isEqualTo(2);
+
+        sql("UPDATE tea_file_chunks SET touched_at = 0");
+        write("a", "maps/fireball.yml", "v3\n");
+        a.push();
+        assertThat(chunkCount()).isEqualTo(1);
     }
 
     private SharedFiles server(String name) throws Exception {

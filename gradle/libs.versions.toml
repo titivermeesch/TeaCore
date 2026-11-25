@@ -13,6 +13,9 @@ junit = "5.11.3"
 archunit = "1.3.0"
 assertj = "3.26.3"
 shadow = "8.3.5"
+# Only published as snapshots; pinned to one build.
+libbyBukkit = "2.0.0-20260709.181438-12"
+libbyCore = "2.0.0-20260709.181438-9"
 
 [libraries]
 adventure-api = { module = "net.kyori:adventure-api", version.ref = "adventure" }
@@ -26,6 +29,8 @@ javalin = { module = "io.javalin:javalin", version.ref = "javalin" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 mysql-connector = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
+libby-bukkit = { module = "com.alessiodp.libby:libby-bukkit", version.ref = "libbyBukkit" }
+libby-core = { module = "com.alessiodp.libby:libby-core", version.ref = "libbyCore" }
 
 worldedit-bukkit = { module = "com.sk89q.worldedit:worldedit-bukkit", version.ref = "worldedit" }
 worldedit-core = { module = "com.sk89q.worldedit:worldedit-core", version.ref = "worldedit" }

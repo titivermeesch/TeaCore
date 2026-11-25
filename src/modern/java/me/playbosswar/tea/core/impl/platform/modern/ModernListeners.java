@@ -21,8 +21,9 @@ final class ModernListeners implements Listener {
     /** Projectiles fly through ghosts (cancellable since 1.20). */
     @EventHandler(priority = EventPriority.LOWEST)
     public void onProjectileHit(org.bukkit.event.entity.ProjectileHitEvent event) {
-        if (event.getHitEntity() != null && Ghosts.isGhost(event.getHitEntity())) {
-            event.setCancelled(true);
+        if (event.getHitEntity() != null && Ghosts.isGhost(event.getHitEntity())
+                && (Object) event instanceof org.bukkit.event.Cancellable cancellable) {
+            cancellable.setCancelled(true);
         }
     }
 }

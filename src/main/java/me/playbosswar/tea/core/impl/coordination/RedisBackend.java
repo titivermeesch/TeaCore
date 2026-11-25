@@ -3,11 +3,17 @@ package me.playbosswar.tea.core.impl.coordination;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.ScanArgs;
+import io.lettuce.core.ScanCursor;
 import io.lettuce.core.SetArgs;
+import io.lettuce.core.KeyScanCursor;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,9 +24,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.HexFormat;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import me.playbosswar.tea.core.api.arena.ArenaId;
 import me.playbosswar.tea.core.api.arena.ArenaState;
 import me.playbosswar.tea.core.api.coordination.ArenaSnapshot;
@@ -38,11 +47,17 @@ import me.playbosswar.tea.core.impl.config.CoreConfig;
  *   tea:arena:<arenaId>                hash, TTL 10s, fields: server, game, map, state, players, min, max, updatedAt
  *   tea:arenas:index                    set of active arenaIds
  *   tea:queue:<gameId>                  sorted set, score = queuedAt-epoch-millis, member = "<uuid>|<name>|<mapIds>"
+ *   tea:queues:index                    set of tea:queue:* keys that may hold entries
  *   tea:matchmaker:leader               SET-NX-EX key; TTL 10s, refreshed every 3s
  * }</pre>
  *
  * Arenas whose hash has expired are treated as offline. Queue entries persist
  * until explicitly removed.
+ *
+ * <p>Pub/sub messages are {@code v2|<epochMillis>|<nonce>|<hmac>|<json>}, the
+ * HMAC-SHA256 over channel, time, nonce and JSON with the network secret.
+ * Unsigned, stale or wrongly signed messages are dropped, and so is a second
+ * copy of a nonce already seen within the age window (a replay).
  */
 public final class RedisBackend implements CoordinationBackend {
 
@@ -54,19 +69,30 @@ public final class RedisBackend implements CoordinationBackend {
     private static final String HOSTS_PREFIX = "tea:hosts:";
     private static final String CONTROL_CHANNEL_PREFIX = "tea:control:";
     private static final String EVENTS_CHANNEL = "tea:events";
+    private static final String QUEUE_PREFIX = "tea:queue:";
+    private static final String QUEUE_INDEX = "tea:queues:index";
+    private static final String SIGNED_VERSION = "v2";
+    static final long MAX_MESSAGE_AGE_MS = Duration.ofMinutes(2).toMillis();
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
 
     private final String serverId;
+    private final byte[] secret;
     private final Logger logger;
     private final RedisClient client;
     private final StatefulRedisConnection<String, String> connection;
     private final RedisCommands<String, String> redis;
     private final StatefulRedisPubSubConnection<String, String> pubsubConnection;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final ReplayGuard replayGuard = new ReplayGuard();
     private final CopyOnWriteArrayList<Consumer<ControlCommand>> controlHandlers = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<CoordinationEvent>> eventHandlers = new CopyOnWriteArrayList<>();
 
-    public RedisBackend(String serverId, CoreConfig.RedisConfig config, Logger logger) {
+    public RedisBackend(String serverId, CoreConfig.RedisConfig config, byte[] secret, Logger logger) {
+        if (secret == null || secret.length == 0) {
+            throw new IllegalArgumentException("A network secret is required");
+        }
         this.serverId = serverId;
+        this.secret = secret.clone();
         this.logger = logger;
         RedisURI.Builder uri = RedisURI.builder().withHost(config.host()).withPort(config.port());
         if (config.password() != null && !config.password().isEmpty()) {
@@ -76,12 +102,25 @@ public final class RedisBackend implements CoordinationBackend {
         this.connection = client.connect();
         this.redis = connection.sync();
         this.redis.ping();
+        indexExistingQueues();
         this.pubsubConnection = client.connectPubSub();
         this.pubsubConnection.addListener(new RedisPubSubAdapter<>() {
             @Override
             public void message(String channel, String payload) {
-                if (channel.equals(controlChannel())) dispatchControl(payload);
-                else if (channel.equals(EVENTS_CHANNEL)) dispatchEvent(payload);
+                long now = System.currentTimeMillis();
+                Opened opened = verify(RedisBackend.this.secret, channel, payload, now);
+                if (opened == null) {
+                    logger.warning("Dropped an unsigned or wrongly signed message on " + channel
+                            + "; check that every server shares the same network secret and runs the same TeaCore version");
+                    return;
+                }
+                if (!replayGuard.firstSeen(opened.nonce(), opened.at(), now)) {
+                    logger.warning("Dropped a replayed message on " + channel);
+                    return;
+                }
+                String body = opened.body();
+                if (channel.equals(controlChannel())) dispatchControl(body);
+                else if (channel.equals(EVENTS_CHANNEL)) dispatchEvent(body);
             }
         });
         this.pubsubConnection.sync().subscribe(controlChannel(), EVENTS_CHANNEL);
@@ -227,9 +266,10 @@ public final class RedisBackend implements CoordinationBackend {
 
     @Override
     public void enqueue(QueueEntry entry) {
-        String key = "tea:queue:" + entry.gameId().value();
+        String key = QUEUE_PREFIX + entry.gameId().value();
         String member = encodeEntry(entry);
         try {
+            redis.sadd(QUEUE_INDEX, key);
             for (String existing : redis.zrange(key, 0, -1)) {
                 if (existing.startsWith(entry.playerUuid() + "|")) {
                     redis.zrem(key, existing);
@@ -244,7 +284,7 @@ public final class RedisBackend implements CoordinationBackend {
     @Override
     public void dequeue(UUID playerUuid) {
         try {
-            for (String key : redis.keys("tea:queue:*")) {
+            for (String key : redis.smembers(QUEUE_INDEX)) {
                 for (String member : redis.zrange(key, 0, -1)) {
                     if (member.startsWith(playerUuid + "|")) {
                         redis.zrem(key, member);
@@ -258,7 +298,7 @@ public final class RedisBackend implements CoordinationBackend {
 
     @Override
     public Collection<QueueEntry> queueFor(GameId gameId) {
-        String key = "tea:queue:" + gameId.value();
+        String key = QUEUE_PREFIX + gameId.value();
         List<QueueEntry> out = new ArrayList<>();
         try {
             for (String member : redis.zrange(key, 0, -1)) {
@@ -287,8 +327,8 @@ public final class RedisBackend implements CoordinationBackend {
     @Override
     public java.util.Optional<QueueEntry> queueEntryOf(UUID playerUuid) {
         try {
-            for (String key : redis.keys("tea:queue:*")) {
-                String gameValue = key.substring("tea:queue:".length());
+            for (String key : redis.smembers(QUEUE_INDEX)) {
+                String gameValue = key.substring(QUEUE_PREFIX.length());
                 GameId gameId = GameId.of(gameValue);
                 for (String member : redis.zrange(key, 0, -1)) {
                     QueueEntry e = decodeEntry(gameId, member);
@@ -321,7 +361,7 @@ public final class RedisBackend implements CoordinationBackend {
     public java.util.Set<String> hostsOf(GameId gameId) {
         java.util.Set<String> out = new java.util.HashSet<>();
         try {
-            for (String key : redis.keys(HOSTS_PREFIX + "*")) {
+            for (String key : scanKeys(HOSTS_PREFIX + "*")) {
                 if (Boolean.TRUE.equals(redis.sismember(key, gameId.value()))) {
                     out.add(key.substring(HOSTS_PREFIX.length()));
                 }
@@ -336,7 +376,7 @@ public final class RedisBackend implements CoordinationBackend {
     public java.util.Set<GameId> allHostedGames() {
         java.util.Set<GameId> out = new java.util.HashSet<>();
         try {
-            for (String key : redis.keys(HOSTS_PREFIX + "*")) {
+            for (String key : scanKeys(HOSTS_PREFIX + "*")) {
                 for (String value : redis.smembers(key)) {
                     if (value != null && !value.isBlank()) out.add(GameId.of(value));
                 }
@@ -350,8 +390,9 @@ public final class RedisBackend implements CoordinationBackend {
     @Override
     public void publishControl(String targetServerId, ControlCommand command) {
         try {
-            String payload = mapper.writeValueAsString(command);
-            redis.publish(CONTROL_CHANNEL_PREFIX + targetServerId, payload);
+            String channel = CONTROL_CHANNEL_PREFIX + targetServerId;
+            redis.publish(channel, seal(secret, channel, mapper.writeValueAsString(command),
+                    System.currentTimeMillis()));
         } catch (Exception e) {
             logger.log(Level.WARNING, "Failed to publish control command to " + targetServerId, e);
         }
@@ -365,8 +406,8 @@ public final class RedisBackend implements CoordinationBackend {
     @Override
     public void publishEvent(CoordinationEvent event) {
         try {
-            String payload = mapper.writeValueAsString(event);
-            redis.publish(EVENTS_CHANNEL, payload);
+            redis.publish(EVENTS_CHANNEL, seal(secret, EVENTS_CHANNEL, mapper.writeValueAsString(event),
+                    System.currentTimeMillis()));
         } catch (Exception e) {
             logger.log(Level.WARNING, "Failed to publish coordination event", e);
         }
@@ -375,6 +416,111 @@ public final class RedisBackend implements CoordinationBackend {
     @Override
     public void subscribeEvents(Consumer<CoordinationEvent> handler) {
         eventHandlers.add(handler);
+    }
+
+    static String seal(byte[] secret, String channel, String body, long nowMillis) {
+        byte[] raw = new byte[16];
+        RANDOM.nextBytes(raw);
+        String nonce = HexFormat.of().formatHex(raw);
+        return SIGNED_VERSION + "|" + nowMillis + "|" + nonce + "|" + mac(secret, channel, nowMillis, nonce, body)
+                + "|" + body;
+    }
+
+    static String open(byte[] secret, String channel, String payload, long nowMillis) {
+        return open(secret, channel, payload, nowMillis, new ReplayGuard());
+    }
+
+    /** @return the JSON body, or {@code null} when the message isn't signed with {@code secret}, is stale or a replay */
+    static String open(byte[] secret, String channel, String payload, long nowMillis, ReplayGuard guard) {
+        Opened opened = verify(secret, channel, payload, nowMillis);
+        return opened != null && guard.firstSeen(opened.nonce(), opened.at(), nowMillis) ? opened.body() : null;
+    }
+
+    record Opened(long at, String nonce, String body) {
+    }
+
+    /** Checks signature and age only; replays still pass. */
+    static Opened verify(byte[] secret, String channel, String payload, long nowMillis) {
+        if (payload == null) {
+            return null;
+        }
+        String[] parts = payload.split("\\|", 5);
+        if (parts.length != 5 || !SIGNED_VERSION.equals(parts[0]) || parts[2].isEmpty()) {
+            return null;
+        }
+        long at;
+        try {
+            at = Long.parseLong(parts[1]);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (Math.abs(nowMillis - at) > MAX_MESSAGE_AGE_MS) {
+            return null;
+        }
+        byte[] expected = mac(secret, channel, at, parts[2], parts[4]).getBytes(StandardCharsets.US_ASCII);
+        if (!MessageDigest.isEqual(expected, parts[3].getBytes(StandardCharsets.US_ASCII))) {
+            return null;
+        }
+        return new Opened(at, parts[2], parts[4]);
+    }
+
+    /** Nonces seen on this receiver, each kept until its message would be too old to accept anyway. */
+    static final class ReplayGuard {
+        private final Map<String, Long> expiries = new HashMap<>();
+        private long nextPrune;
+
+        synchronized boolean firstSeen(String nonce, long at, long nowMillis) {
+            if (nowMillis >= nextPrune) {
+                expiries.values().removeIf(expiry -> expiry < nowMillis);
+                nextPrune = nowMillis + 10_000;
+            }
+            return expiries.putIfAbsent(nonce, at + MAX_MESSAGE_AGE_MS) == null;
+        }
+
+        synchronized int size() {
+            return expiries.size();
+        }
+    }
+
+    private static String mac(byte[] secret, String channel, long at, String nonce, String body) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret, "HmacSHA256"));
+            mac.update(channel.getBytes(StandardCharsets.UTF_8));
+            mac.update((byte) '\n');
+            mac.update(Long.toString(at).getBytes(StandardCharsets.US_ASCII));
+            mac.update((byte) '\n');
+            mac.update(nonce.getBytes(StandardCharsets.UTF_8));
+            mac.update((byte) '\n');
+            return HexFormat.of().formatHex(mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private List<String> scanKeys(String pattern) {
+        List<String> out = new ArrayList<>();
+        ScanArgs args = ScanArgs.Builder.matches(pattern).limit(500);
+        KeyScanCursor<String> cursor = redis.scan(args);
+        while (true) {
+            out.addAll(cursor.getKeys());
+            if (cursor.isFinished()) {
+                return out;
+            }
+            cursor = redis.scan(ScanCursor.of(cursor.getCursor()), args);
+        }
+    }
+
+    /** Queues written before the index existed; only on startup, so it may scan. */
+    private void indexExistingQueues() {
+        try {
+            List<String> keys = scanKeys(QUEUE_PREFIX + "*");
+            if (!keys.isEmpty()) {
+                redis.sadd(QUEUE_INDEX, keys.toArray(String[]::new));
+            }
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to index existing queues", e);
+        }
     }
 
     private void dispatchControl(String payload) {

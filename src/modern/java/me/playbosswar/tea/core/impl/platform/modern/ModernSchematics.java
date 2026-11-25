@@ -23,6 +23,11 @@ final class ModernSchematics implements SchematicStore {
     }
 
     @Override
+    public boolean pastesOffMainThread() {
+        return Bukkit.getPluginManager().isPluginEnabled("FastAsyncWorldEdit");
+    }
+
+    @Override
     public void paste(Path file, World world, int x, int y, int z) throws IOException {
         try {
             WorldEditPaster.paste(file, world, x, y, z);

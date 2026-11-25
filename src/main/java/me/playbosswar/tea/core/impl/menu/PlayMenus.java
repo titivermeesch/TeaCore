@@ -206,7 +206,7 @@ public final class PlayMenus {
                 continue;
             }
             for (AchievementDefinition a : core.achievements().forGame(def.id())) {
-                boolean unlocked = core.achievements().isUnlocked(target, def.id(), a.id());
+                boolean unlocked = unlockedCached(target, def.id(), a.id());
                 Map<String, String> v = new HashMap<>();
                 v.put("game", def.id().value());
                 v.put("game_name", gameName(viewer, def.id()));
@@ -226,7 +226,7 @@ public final class PlayMenus {
                         || (args.containsKey("game") && !a.gameId().value().equals(args.get("game")))) {
                     continue;
                 }
-                boolean unlocked = core.achievements().isUnlocked(target, a.gameId(), a.id());
+                boolean unlocked = unlockedCached(target, a.gameId(), a.id());
                 Map<String, String> v = new HashMap<>();
                 v.put("game", a.gameId().value());
                 v.put("game_name", gameName(viewer, a.gameId()));
@@ -240,6 +240,13 @@ public final class PlayMenus {
             }
         }
         return out;
+    }
+
+    private boolean unlockedCached(UUID target, GameId game, String id) {
+        if (core.achievements() instanceof me.playbosswar.tea.core.impl.achievement.AchievementServiceImpl impl) {
+            return impl.isUnlockedCached(target, game, id);
+        }
+        return core.achievements().isUnlocked(target, game, id);
     }
 
     private List<MenuEntry> history(Player viewer, Map<String, String> args) {

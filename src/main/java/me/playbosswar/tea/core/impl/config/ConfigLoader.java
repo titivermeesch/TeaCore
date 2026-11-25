@@ -22,6 +22,7 @@ public final class ConfigLoader {
             "network.server-id",
             "network.lobby-server",
             "network.eligible-matchmaker",
+            "network.secret",
             "redis",
             "redis.host",
             "redis.port",
@@ -196,7 +197,7 @@ public final class ConfigLoader {
 
         ConfigurationSection dashboardSection = section(yaml, "dashboard");
         boolean dashEnabled = dashboardSection.getBoolean("enabled", false);
-        String bindAddress = dashboardSection.getString("bind-address", "0.0.0.0");
+        String bindAddress = dashboardSection.getString("bind-address", "127.0.0.1");
         int dashPort = dashboardSection.getInt("port", 8080);
         String adminToken = dashboardSection.getString("admin-token", "");
         if (adminToken == null || adminToken.isBlank()) {

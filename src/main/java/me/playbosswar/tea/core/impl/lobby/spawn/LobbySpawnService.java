@@ -122,8 +122,8 @@ public final class LobbySpawnService implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         if (!manageSpawn)
             return;
-        // Players who logged out inside an arena world are handled by the arena
-        // manager's reconnect logic. Only teleport fresh arrivals.
+        // ArenaDisconnectListener has already moved stranded players out; anyone
+        // still in an arena world is being routed into its waiting room.
         Player p = event.getPlayer();
         if (p.getWorld().getName().startsWith("tea_arena_"))
             return;

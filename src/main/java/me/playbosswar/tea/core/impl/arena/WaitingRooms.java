@@ -254,7 +254,7 @@ public final class WaitingRooms implements Listener {
         return true;
     }
 
-    /** Safe off the main thread when the map paste is. */
+    /** Off the main thread only when {@link SchematicStore#pastesOffMainThread()}. */
     void paste(Room room, World world) {
         try {
             Location o = room.origin(world);
@@ -312,7 +312,7 @@ public final class WaitingRooms implements Listener {
         String worldName = "tea_edit_room_" + player.getUniqueId().toString().substring(0, 8) + "_" + roomId;
         WorldCreator creator = TeaCoreAPI.get().platform().worlds().voidWorld(worldName)
                 .environment(World.Environment.NORMAL).generateStructures(false);
-        World world = creator.createWorld();
+        World world = ArenaWorlds.create(creator);
         if (world == null) {
             throw new IllegalStateException("Could not create the editor world.");
         }

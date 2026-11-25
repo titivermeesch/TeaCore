@@ -33,7 +33,6 @@ import me.playbosswar.tea.core.impl.settings.SettingsSchema.Type;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.Nullable;
-import org.yaml.snakeyaml.Yaml;
 
 /**
  * Each server publishes the schemas and values of the files it can edit, so the
@@ -115,7 +114,7 @@ public final class SettingsServiceImpl implements SettingsService {
                 return;
             }
             try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-                Object raw = new Yaml().load(reader);
+                Object raw = SafeYaml.create().load(reader);
                 schema = SettingsSchema.parse(SettingsSchema.map(raw));
             }
         } catch (IOException | RuntimeException e) {
@@ -374,6 +373,17 @@ public final class SettingsServiceImpl implements SettingsService {
     private synchronized void applyLocal(String fileId, List<Change> writes, String actor) {
         Local l = local.get(fileId);
         if (l == null) {
+            logger.warning("Ignored settings for unknown file " + fileId + " from " + actor);
+            return;
+        }
+        try {
+            writes = toWrites(new FileView(l.schema, l.owner.getName(), List.of(coordination.serverId()),
+                    valuesOf(l), new LinkedHashSet<>()), writes);
+        } catch (RuntimeException e) {
+            logger.warning("Rejected settings for " + fileId + " from " + actor + ": " + e.getMessage());
+            return;
+        }
+        if (writes.isEmpty()) {
             return;
         }
         try {

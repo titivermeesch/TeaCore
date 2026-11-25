@@ -1,5 +1,6 @@
 package me.playbosswar.tea.core.impl.platform.legacy;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,7 +37,11 @@ import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
 
-/** {@link Platform} for 1.8 - 1.12 servers (tested on Spigot 1.8.8). */
+/**
+ * {@link Platform} for 1.8 - 1.12 servers. Compiled against the 1.8.8 API, so
+ * the 1.9 - 1.12 additions (hands, entity flags, projectile hits) are looked up
+ * reflectively and used when present.
+ */
 public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.impl.platform.PlatformInternals {
 
     private final Plugin plugin;
@@ -66,10 +71,78 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
     });
     private final Sounds sounds = new XSounds();
 
+    private static final Method SET_AI = api(LivingEntity.class, "setAI", boolean.class);
+    private static final Method SET_INVULNERABLE = api(Entity.class, "setInvulnerable", boolean.class);
+    private static final Method SET_SILENT = api(Entity.class, "setSilent", boolean.class);
+    private static final Method SET_GRAVITY = api(Entity.class, "setGravity", boolean.class);
+    private static final Method SET_GLOWING = api(Entity.class, "setGlowing", boolean.class);
+    private static final Method SET_COLLIDABLE = api(LivingEntity.class, "setCollidable", boolean.class);
+    private static final Method INTERACT_HAND = api(PlayerInteractEvent.class, "getHand");
+    private static final Method INTERACT_ENTITY_HAND = api(org.bukkit.event.player.PlayerInteractEntityEvent.class, "getHand");
+    private static final Method STORAGE = api(org.bukkit.inventory.Inventory.class, "getStorageContents");
+    private static final Method SET_STORAGE = api(org.bukkit.inventory.Inventory.class, "setStorageContents", ItemStack[].class);
+    private static final Method HIT_ENTITY = api(org.bukkit.event.entity.ProjectileHitEvent.class, "getHitEntity");
+    private static final Method HIT_BLOCK = api(org.bukkit.event.entity.ProjectileHitEvent.class, "getHitBlock");
+
+    private static Method api(Class<?> type, String name, Class<?>... args) {
+        try {
+            return type.getMethod(name, args);
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
+    }
+
+    private static Object call(Method method, Object target, Object... args) {
+        try {
+            return method.invoke(target, args);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** False only for an off-hand event; the event has no hand before 1.9. */
+    private static boolean isMainHandEvent(Method getHand, Object event) {
+        if (getHand == null) return true;
+        Object hand = call(getHand, event);
+        return hand == null || "HAND".equals(((Enum<?>) hand).name());
+    }
+
+    private void flag(Method api, Entity entity, String nbtKey, boolean value) {
+        if (api != null) call(api, entity, value);
+        else nms.setEntityByte(entity, nbtKey, value ? 1 : 0);
+    }
+
     public LegacyPlatform(Plugin plugin, ServerVersion version) {
         this.plugin = plugin;
         this.version = version;
         this.nms = new Nms();
+        registerSwapHands();
+    }
+
+    /** PlayerSwapHandItemsEvent is 1.9+ and not in the 1.8.8 API, so it's registered by name. */
+    @SuppressWarnings("unchecked")
+    private void registerSwapHands() {
+        Class<? extends org.bukkit.event.Event> type;
+        Method mainItem;
+        Method offItem;
+        try {
+            type = (Class<? extends org.bukkit.event.Event>)
+                    Class.forName("org.bukkit.event.player.PlayerSwapHandItemsEvent");
+            mainItem = type.getMethod("getMainHandItem");
+            offItem = type.getMethod("getOffHandItem");
+        } catch (ReflectiveOperationException e) {
+            return;
+        }
+        plugin.getServer().getPluginManager().registerEvent(type, new org.bukkit.event.Listener() { },
+                org.bukkit.event.EventPriority.LOW, (listener, event) -> {
+                    if (!type.isInstance(event)) return;
+                    Player player = ((org.bukkit.event.player.PlayerEvent) event).getPlayer();
+                    if (me.playbosswar.tea.core.impl.platform.Ghosts.isGhost(player)
+                            || me.playbosswar.tea.core.impl.platform.LockedItems.isLocked((ItemStack) call(mainItem, event))
+                            || me.playbosswar.tea.core.impl.platform.LockedItems.isLocked((ItemStack) call(offItem, event))) {
+                        ((org.bukkit.event.Cancellable) event).setCancelled(true);
+                    }
+                }, plugin);
     }
 
     @Override public ServerVersion version() { return version; }
@@ -186,14 +259,22 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
     @Override public Particles particles() { return particles; }
 
     private final EntityControl entities = new EntityControl() {
-        @Override public void setAi(LivingEntity entity, boolean ai) { nms.setEntityByte(entity, "NoAI", ai ? 0 : 1); }
-        @Override public void setInvulnerable(Entity entity, boolean v) { nms.setEntityByte(entity, "Invulnerable", v ? 1 : 0); }
-        @Override public void setSilent(Entity entity, boolean v) { nms.setEntityByte(entity, "Silent", v ? 1 : 0); }
-        @Override public void setGravity(Entity entity, boolean v) {
-            if (entity instanceof ArmorStand stand) stand.setGravity(v);
+        @Override public void setAi(LivingEntity entity, boolean ai) {
+            if (SET_AI != null) call(SET_AI, entity, ai);
+            else nms.setEntityByte(entity, "NoAI", ai ? 0 : 1);
         }
-        @Override public void setCollidable(LivingEntity entity, boolean v) { /* 1.9+ */ }
-        @Override public void setGlowing(Entity entity, boolean v) { /* 1.9+ */ }
+        @Override public void setInvulnerable(Entity entity, boolean v) { flag(SET_INVULNERABLE, entity, "Invulnerable", v); }
+        @Override public void setSilent(Entity entity, boolean v) { flag(SET_SILENT, entity, "Silent", v); }
+        @Override public void setGravity(Entity entity, boolean v) {
+            if (SET_GRAVITY != null) call(SET_GRAVITY, entity, v);
+            else if (entity instanceof ArmorStand stand) stand.setGravity(v);
+        }
+        @Override public void setCollidable(LivingEntity entity, boolean v) {
+            if (SET_COLLIDABLE != null) call(SET_COLLIDABLE, entity, v);
+        }
+        @Override public void setGlowing(Entity entity, boolean v) {
+            if (SET_GLOWING != null) call(SET_GLOWING, entity, v);
+        }
         @Override public double maxHealth(LivingEntity entity) { return entity.getMaxHealth(); }
 
         @Override
@@ -237,8 +318,8 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
 
         @Override
         public WorldCreator voidWorld(String name) {
-            // Superflat with no layers: an empty world.
-            return new WorldCreator(name).type(WorldType.FLAT).generatorSettings("2;0;1;").generateStructures(false);
+            return new WorldCreator(name).type(WorldType.FLAT).generateStructures(false)
+                    .generator(new LegacyVoidGenerator());
         }
     };
 
@@ -248,10 +329,17 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
         @Override public String locale(Player p) { return p.spigot().getLocale(); }
         @Override public ItemStack mainHand(Player p) { return p.getItemInHand(); }
         @Override public void setMainHand(Player p, ItemStack item) { p.setItemInHand(item); }
-        @Override public ItemStack[] storage(Player p) { return p.getInventory().getContents(); }
-        @Override public void setStorage(Player p, ItemStack[] items) { p.getInventory().setContents(items); }
-        @Override public boolean isMainHand(PlayerInteractEvent e) { return true; }
-        @Override public boolean isMainHand(org.bukkit.event.player.PlayerInteractEntityEvent e) { return true; }
+        @Override public ItemStack[] storage(Player p) {
+            return STORAGE != null ? (ItemStack[]) call(STORAGE, p.getInventory()) : p.getInventory().getContents();
+        }
+        @Override public void setStorage(Player p, ItemStack[] items) {
+            if (SET_STORAGE != null) call(SET_STORAGE, p.getInventory(), (Object) items);
+            else p.getInventory().setContents(items);
+        }
+        @Override public boolean isMainHand(PlayerInteractEvent e) { return isMainHandEvent(INTERACT_HAND, e); }
+        @Override public boolean isMainHand(org.bukkit.event.player.PlayerInteractEntityEvent e) {
+            return isMainHandEvent(INTERACT_ENTITY_HAND, e);
+        }
 
         @Override
         public void setVisible(Player viewer, Player target, boolean visible) {
@@ -288,10 +376,11 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
 
     @Override public me.playbosswar.tea.core.api.platform.Scoreboards scoreboards() { return scoreboards; }
 
-    /** 1.8 doesn't say what a projectile hit: look along its path. */
+    /** Before 1.11 the event doesn't say what a projectile hit: look along its path. */
     private final me.playbosswar.tea.core.api.platform.Projectiles projectiles = new me.playbosswar.tea.core.api.platform.Projectiles() {
         @Override
         public Entity hitEntity(org.bukkit.event.entity.ProjectileHitEvent e) {
+            if (HIT_ENTITY != null) return (Entity) call(HIT_ENTITY, e);
             org.bukkit.entity.Projectile p = e.getEntity();
             Entity best = null;
             double bestD = 2.5 * 2.5;
@@ -305,6 +394,7 @@ public final class LegacyPlatform implements Platform, me.playbosswar.tea.core.i
 
         @Override
         public Block hitBlock(org.bukkit.event.entity.ProjectileHitEvent e) {
+            if (HIT_BLOCK != null) return (Block) call(HIT_BLOCK, e);
             org.bukkit.util.Vector dir = e.getEntity().getVelocity();
             if (dir.lengthSquared() < 1e-6) return null;
             org.bukkit.util.BlockIterator it = new org.bukkit.util.BlockIterator(e.getEntity().getWorld(),

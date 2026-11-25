@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     java
     `maven-publish`
@@ -28,6 +30,10 @@ repositories {
     maven("https://repo.opencollab.dev/main/")
     // Party plugin APIs (soft dependencies: parties queue together).
     maven("https://repo.alessiodp.com/releases/")
+    // Libby (runtime library loader) is only published as snapshots.
+    maven("https://repo.alessiodp.com/snapshots/") {
+        mavenContent { includeGroup("com.alessiodp.libby") }
+    }
     maven("https://simonsator.de/repo/")
 }
 
@@ -45,6 +51,73 @@ val legacyApiDep = "org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT"
 val modernApiDep = "org.spigotmc:spigot-api:$spigotApiVersion"
 val shared: Configuration by configurations.creating
 configurations.compileOnly { extendsFrom(shared) }
+
+// --- Libraries ---------------------------------------------------------------
+// Small libraries are shaded. The large ones are downloaded from Maven Central
+// at first start (LibraryLoader), each group only when its feature is in use:
+//   core       always (settings, webhooks)
+//   redis      network.mode is not standalone
+//   dashboard  dashboard.enabled
+//   mysql      database.type is mysql
+// The build writes their coordinates, SHA-256 and relocations to
+// teacore-libraries.txt; the loader relocates them to the same packages the
+// shadow jar uses for TeaCore's own references.
+val shadedLibs: Configuration by configurations.creating
+val libraryGroups = linkedMapOf(
+    "core" to configurations.create("coreLibs"),
+    "redis" to configurations.create("redisLibs"),
+    "dashboard" to configurations.create("dashboardLibs"),
+    "mysql" to configurations.create("mysqlLibs"),
+)
+configurations.implementation { extendsFrom(shadedLibs, *libraryGroups.values.toTypedArray()) }
+(listOf(shadedLibs) + libraryGroups.values).forEach {
+    it.isCanBeConsumed = false
+    it.shouldResolveConsistentlyWith(configurations.runtimeClasspath.get())
+}
+val libsPackage = "me.playbosswar.tea.core.libs"
+val downloadedRelocations = linkedMapOf(
+    "io.lettuce" to "lettuce",
+    "io.netty" to "netty",
+    "reactor" to "reactor",
+    "org.reactivestreams" to "reactivestreams",
+    "io.javalin" to "javalin",
+    "org.eclipse.jetty" to "jetty",
+    "com.fasterxml.jackson" to "jackson",
+    "org.jetbrains.annotations" to "annotations",
+    "kotlin" to "kotlin",
+).mapValues { "$libsPackage.${it.value}" }
+
+val libraryManifest = tasks.register("libraryManifest") {
+    description = "Lists the libraries TeaCore downloads at startup."
+    val out = layout.buildDirectory.file("generated/library-manifest/teacore-libraries.txt")
+    inputs.files(libraryGroups.values, shadedLibs)
+    inputs.property("relocations", downloadedRelocations)
+    outputs.file(out)
+    doLast {
+        fun ResolvedArtifact.key() = moduleVersion.id.let { "${it.group}:${it.name}:${it.version}" } +
+            (classifier?.let { ":$it" } ?: "")
+        val shadedKeys = shadedLibs.resolvedConfiguration.resolvedArtifacts.map { it.key() }.toSet()
+        val features = linkedMapOf<String, MutableSet<String>>()
+        val files = mutableMapOf<String, File>()
+        libraryGroups.forEach { (feature, conf) ->
+            conf.resolvedConfiguration.resolvedArtifacts
+                .filter { it.extension == "jar" && it.key() !in shadedKeys }
+                .forEach {
+                    features.getOrPut(it.key()) { linkedSetOf() } += feature
+                    files[it.key()] = it.file
+                }
+        }
+        val lines = mutableListOf("# feature(s) group:artifact:version[:classifier] sha256")
+        downloadedRelocations.forEach { (from, to) -> lines += "relocate $from $to" }
+        features.forEach { (key, groups) ->
+            val sha = MessageDigest.getInstance("SHA-256")
+                .digest(files.getValue(key).readBytes()).joinToString("") { "%02x".format(it) }
+            val group = if ("core" in groups) "core" else groups.joinToString(",")
+            lines += "library $group $key $sha"
+        }
+        out.get().asFile.writeText(lines.joinToString("\n", postfix = "\n"))
+    }
+}
 sourceSets {
     create("modern") { java.srcDir("src/modern/java") }
     create("legacy") { java.srcDir("src/legacy/java") }
@@ -104,22 +177,24 @@ dependencies {
     shared("de.simonsator:spigot-party-api-for-party-and-friends:1.0.7-RELEASE") { isTransitive = false }
     shared("de.simonsator:Party-and-Friends-MySQL-Edition-Spigot-API:1.6.2-RELEASE") { isTransitive = false }
     // Item, sound and particle names across versions (shaded, relocated).
-    implementation("com.github.cryptomorin:XSeries:14.0.0")
+    shadedLibs("com.github.cryptomorin:XSeries:14.0.0")
 
-    implementation(libs.adventure.api)
-    implementation(libs.adventure.minimessage)
-    implementation(libs.adventure.platform.bukkit)
-    implementation(libs.hikari)
-    implementation(libs.lettuce)
-    implementation(libs.caffeine)
-    implementation(libs.javalin)
-    implementation(libs.jackson.databind)
-    compileOnly(libs.sqlite.jdbc)
-    testImplementation(libs.sqlite.jdbc)
-    implementation(libs.mysql.connector) { exclude(group = "com.google.protobuf") }
+    shadedLibs(libs.adventure.api)
+    shadedLibs(libs.adventure.minimessage)
+    shadedLibs(libs.adventure.platform.bukkit)
+    shadedLibs(libs.hikari)
+    shadedLibs(libs.caffeine)
+    shadedLibs(libs.libby.bukkit) { isTransitive = false }
+    shadedLibs(libs.libby.core)
     // FastStats — error tracking + custom metrics, shaded with relocation so
     // it can't collide with another plugin's copy.
-    implementation("dev.faststats.metrics:bukkit:0.22.0")
+    shadedLibs("dev.faststats.metrics:bukkit:0.22.0")
+    "coreLibs"(libs.jackson.databind)
+    "redisLibs"(libs.lettuce)
+    "dashboardLibs"(libs.javalin)
+    "mysqlLibs"(libs.mysql.connector) { exclude(group = "com.google.protobuf") }
+    compileOnly(libs.sqlite.jdbc)
+    testImplementation(libs.sqlite.jdbc)
 
     testImplementation(modernApiDep)
     testImplementation(libs.junit.jupiter)
@@ -148,6 +223,7 @@ val dashboardBuild = tasks.register<Exec>("dashboardBuild") {
 
 tasks.named<Copy>("processResources") {
     dependsOn(dashboardBuild)
+    from(libraryManifest)
     from(dashboardDist) {
         into("dashboard")
     }
@@ -173,26 +249,19 @@ tasks.jar {
 
 tasks.shadowJar {
     archiveClassifier.set("all")
+    configurations = listOf(shadedLibs)
     mergeServiceFiles()
     from(sourceSets["modern"].output, sourceSets["legacy"].output, sourceSets["cloudnet3"].output)
 
-    val base = "me.playbosswar.tea.core.libs"
+    val base = libsPackage
     relocate("net.kyori", "$base.kyori")
     relocate("com.zaxxer.hikari", "$base.hikari")
-    relocate("io.lettuce", "$base.lettuce")
-    relocate("io.netty", "$base.netty")
-    relocate("reactor", "$base.reactor")
-    relocate("org.reactivestreams", "$base.reactivestreams")
     relocate("com.github.benmanes.caffeine", "$base.caffeine")
-    relocate("io.javalin", "$base.javalin")
-    relocate("org.eclipse.jetty", "$base.jetty")
-    relocate("com.fasterxml.jackson", "$base.jackson")
-    relocate("org.jetbrains.annotations", "$base.annotations")
-    relocate("kotlin", "$base.kotlin")
     relocate("dev.faststats", "$base.faststats")
     relocate("com.cryptomorin.xseries", "$base.xseries")
-    exclude("com/mysql/cj/x/protobuf/**")
-    exclude("javax/servlet/resources/**", "jakarta/servlet/resources/**")
+    relocate("com.alessiodp.libby", "$base.libby")
+    // The downloaded libraries are not in this jar; this rewrites TeaCore's references to them.
+    downloadedRelocations.forEach { (from, to) -> relocate(from, to) }
     exclude("**/*.js.map")
 }
 

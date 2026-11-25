@@ -7,8 +7,8 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * The bit of 1.8-1.12 server internals TeaCore needs: string tags in item NBT
- * (under a "tea" compound) and byte flags in entity NBT. Method names are the
- * 1.8 (v1_8_R3) obfuscated ones: Entity#e(tag) saves, Entity#f(tag) loads.
+ * (under a "tea" compound) and byte flags in entity NBT. Entity#f(tag) loads on
+ * 1.8 - 1.12; the save method is Entity#e(tag) up to 1.11 and Entity#save(tag) on 1.12.
  */
 final class Nms {
 
@@ -53,13 +53,21 @@ final class Nms {
             removeKey = nbtCompound.getMethod("remove", String.class);
             setByte = nbtCompound.getMethod("setByte", String.class, byte.class);
             entityHandle = Class.forName(obc + ".entity.CraftEntity").getMethod("getHandle");
-            entitySave = nmsEntity.getMethod("e", nbtCompound);
+            entitySave = entitySaveMethod(nmsEntity, nbtCompound);
             entityLoad = nmsEntity.getMethod("f", nbtCompound);
             worldHandle = Class.forName(obc + ".CraftWorld").getMethod("getHandle");
             createExplosion = Class.forName(nmsPkg + ".World").getMethod("createExplosion", nmsEntity,
                     double.class, double.class, double.class, float.class, boolean.class, boolean.class);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Unsupported server internals for the legacy platform", e);
+        }
+    }
+
+    private static Method entitySaveMethod(Class<?> nmsEntity, Class<?> nbtCompound) throws NoSuchMethodException {
+        try {
+            return nmsEntity.getMethod("save", nbtCompound);
+        } catch (NoSuchMethodException e) {
+            return nmsEntity.getMethod("e", nbtCompound);
         }
     }
 

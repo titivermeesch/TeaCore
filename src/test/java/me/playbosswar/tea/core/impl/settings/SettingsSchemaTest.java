@@ -12,7 +12,6 @@ import me.playbosswar.tea.core.impl.settings.SettingsSchema.Kind;
 import me.playbosswar.tea.core.impl.settings.SettingsServiceImpl.Change;
 import me.playbosswar.tea.core.impl.settings.SettingsServiceImpl.FileView;
 import org.junit.jupiter.api.Test;
-import org.yaml.snakeyaml.Yaml;
 
 class SettingsSchemaTest {
 
@@ -42,7 +41,7 @@ class SettingsSchemaTest {
             """;
 
     private static SettingsSchema schema(String yaml) {
-        return SettingsSchema.parse(SettingsSchema.map(new Yaml().load(yaml)));
+        return SettingsSchema.parse(SettingsSchema.map(SafeYaml.create().load(yaml)));
     }
 
     private static FileView view(SettingsSchema schema, Map<String, Object> values) {
@@ -131,12 +130,12 @@ class SettingsSchemaTest {
     void bundledSchemasParse() throws Exception {
         for (String name : List.of("settings/teacore.yml", "settings/quests.yml")) {
             try (InputStream in = getClass().getClassLoader().getResourceAsStream(name)) {
-                SettingsSchema s = SettingsSchema.parse(SettingsSchema.map(new Yaml().load(in)));
+                SettingsSchema s = SettingsSchema.parse(SettingsSchema.map(SafeYaml.create().load(in)));
                 assertThat(s.fields()).isNotEmpty();
             }
         }
         try (InputStream in = getClass().getClassLoader().getResourceAsStream("settings/quests.yml")) {
-            SettingsSchema s = SettingsSchema.parse(SettingsSchema.map(new Yaml().load(in)));
+            SettingsSchema s = SettingsSchema.parse(SettingsSchema.map(SafeYaml.create().load(in)));
             assertThat(s.resolve("weekly.win-15.reward.coins").orElseThrow().field().title())
                     .isEqualTo("Coin reward");
         }
@@ -149,10 +148,10 @@ class SettingsSchemaTest {
             SettingsSchema s;
             Object doc;
             try (InputStream in = getClass().getClassLoader().getResourceAsStream(pair[0])) {
-                s = SettingsSchema.parse(SettingsSchema.map(new Yaml().load(in)));
+                s = SettingsSchema.parse(SettingsSchema.map(SafeYaml.create().load(in)));
             }
             try (InputStream in = getClass().getClassLoader().getResourceAsStream(pair[1])) {
-                doc = new Yaml().load(in);
+                doc = SafeYaml.create().load(in);
             }
             for (var f : s.fields()) {
                 assertThat(SettingsValues.get(doc, f.path())).as(pair[1] + ": " + f.path()).isNotNull();

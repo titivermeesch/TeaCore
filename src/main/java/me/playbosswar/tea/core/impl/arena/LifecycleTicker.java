@@ -20,6 +20,7 @@ public final class LifecycleTicker {
     private final GameRegistry gameRegistry;
     private final MessageService messageService;
     private BukkitTask task;
+    private boolean shutdownScheduled;
 
     public LifecycleTicker(Plugin plugin, ArenaManagerImpl arenaManager, GameRegistry gameRegistry,
             MessageService messageService) {
@@ -151,6 +152,11 @@ public final class LifecycleTicker {
 
     private void tickStarting(ArenaImpl arena, GameDefinition def) {
         if (arena.phaseSecondsRemaining() <= 0) {
+            if (!arenaManager.canGoLive(arena)) {
+                broadcastCountdownAbort(arena);
+                arenaManager.returnToWaiting(arena, def);
+                return;
+            }
             int matchSeconds = def.lifecycle().maxMatchSeconds();
             arenaManager.transition(arena, ArenaState.LIVE, matchSeconds > 0 ? matchSeconds : -1);
         } else {
@@ -203,7 +209,12 @@ public final class LifecycleTicker {
             }
             case SHUTDOWN -> {
                 arenaManager.evacuate(arena);
-                Bukkit.getScheduler().runTaskLater(plugin, Bukkit::shutdown, 100L);
+                // Leaves ENDING so this runs once; the server is going down anyway.
+                arenaManager.transition(arena, ArenaState.RESETTING, -1);
+                if (!shutdownScheduled) {
+                    shutdownScheduled = true;
+                    Bukkit.getScheduler().runTaskLater(plugin, Bukkit::shutdown, 100L);
+                }
             }
         }
     }

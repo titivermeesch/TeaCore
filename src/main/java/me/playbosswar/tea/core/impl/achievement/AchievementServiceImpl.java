@@ -1,14 +1,23 @@
 package me.playbosswar.tea.core.impl.achievement;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.sql.DataSource;
@@ -17,9 +26,19 @@ import me.playbosswar.tea.core.api.achievement.AchievementService;
 import me.playbosswar.tea.core.api.game.GameId;
 import me.playbosswar.tea.core.api.message.MessageService;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 
-/** Unlock state lives in {@code tea_achievements}; its primary key makes a repeat unlock a no-op. */
-public final class AchievementServiceImpl implements AchievementService {
+/**
+ * Unlock state lives in {@code tea_achievements}; its primary key makes a repeat unlock a no-op.
+ * Menus and placeholders read a per-player cache that loads in the background.
+ */
+public final class AchievementServiceImpl implements AchievementService, Listener {
+
+    private record Unlocked(Set<String> keys, long loadedAt) { }
+
+    private static final long REFRESH_MS = 120_000;
 
     private final DataSource dataSource;
     private final Logger logger;
@@ -32,6 +51,15 @@ public final class AchievementServiceImpl implements AchievementService {
     }
 
     private volatile UnlockListener unlockListener;
+    private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "TeaCore-achievements");
+        t.setDaemon(true);
+        return t;
+    });
+    private final Cache<UUID, Unlocked> unlocked = Caffeine.newBuilder()
+            .maximumSize(10_000).expireAfterAccess(Duration.ofMinutes(30)).build();
+    private final Set<UUID> loading = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean storedLoading = new AtomicBoolean();
 
     public void setUnlockListener(UnlockListener listener) {
         this.unlockListener = listener;
@@ -41,6 +69,7 @@ public final class AchievementServiceImpl implements AchievementService {
         this.dataSource = dataSource;
         this.logger = logger;
         this.messages = messages;
+        storedCached();
     }
 
     @Override
@@ -93,16 +122,24 @@ public final class AchievementServiceImpl implements AchievementService {
     private volatile java.util.List<Stored> storedCache;
     private volatile long storedAt;
 
-    /** {@link #stored()}, re-read at most once a minute. */
+    /** {@link #stored()} as last read, refreshed in the background at most once a minute; empty until the first read. */
     public java.util.List<Stored> storedCached() {
-        long now = System.currentTimeMillis();
         java.util.List<Stored> cached = storedCache;
-        if (cached == null || now - storedAt > 60_000) {
-            cached = stored();
-            storedCache = cached;
-            storedAt = now;
+        if ((cached == null || System.currentTimeMillis() - storedAt > 60_000) && storedLoading.compareAndSet(false, true)) {
+            try {
+                io.execute(() -> {
+                    try {
+                        storedCache = stored();
+                        storedAt = System.currentTimeMillis();
+                    } finally {
+                        storedLoading.set(false);
+                    }
+                });
+            } catch (RejectedExecutionException closed) {
+                storedLoading.set(false);
+            }
         }
-        return cached;
+        return cached == null ? java.util.List.of() : cached;
     }
 
     /** Includes games that are only stored by other servers. */
@@ -135,7 +172,12 @@ public final class AchievementServiceImpl implements AchievementService {
 
     @Override
     public boolean unlock(Player player, GameId gameId, String achievementId) {
-        if (player == null || isUnlocked(player.getUniqueId(), gameId, achievementId)) {
+        if (player == null) {
+            return false;
+        }
+        Unlocked known = unlocked.getIfPresent(player.getUniqueId());
+        if (known != null && known.keys().contains(key(gameId, achievementId))
+                || isUnlocked(player.getUniqueId(), gameId, achievementId)) {
             return false;
         }
         String sql = "INSERT INTO tea_achievements (uuid, game_id, achievement, unlocked_at) "
@@ -152,6 +194,7 @@ public final class AchievementServiceImpl implements AchievementService {
             logger.log(Level.FINE, "Could not insert achievement " + achievementId, e);
             return false;
         }
+        remember(player.getUniqueId(), gameId, achievementId);
         notifyUnlock(player, gameId, achievementId);
         if (unlockListener != null) {
             AchievementDefinition def = definitions.get(key(gameId, achievementId));
@@ -171,11 +214,87 @@ public final class AchievementServiceImpl implements AchievementService {
             ps.setString(2, gameId.value());
             ps.setString(3, achievementId);
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
+                if (rs.next()) {
+                    remember(playerUuid, gameId, achievementId);
+                    return true;
+                }
+                return false;
             }
         } catch (SQLException e) {
             logger.log(Level.WARNING, "Failed to read achievement state for " + playerUuid, e);
             return false;
+        }
+    }
+
+    /** Non-blocking: the last loaded state, or false while the player's achievements load in the background. */
+    public boolean isUnlockedCached(UUID playerUuid, GameId gameId, String achievementId) {
+        Unlocked known = unlocked.getIfPresent(playerUuid);
+        if (known == null || System.currentTimeMillis() - known.loadedAt() > REFRESH_MS) {
+            loadAsync(playerUuid);
+        }
+        return known != null && known.keys().contains(key(gameId, achievementId));
+    }
+
+    public void loadAsync(UUID playerUuid) {
+        if (!loading.add(playerUuid)) {
+            return;
+        }
+        try {
+            io.execute(() -> {
+                try {
+                    Set<String> keys = loadUnlocked(playerUuid);
+                    if (keys != null) {
+                        // Keeps unlocks recorded while this read ran.
+                        unlocked.asMap().merge(playerUuid, new Unlocked(keys, System.currentTimeMillis()),
+                                (old, fresh) -> {
+                                    fresh.keys().addAll(old.keys());
+                                    return fresh;
+                                });
+                    }
+                } finally {
+                    loading.remove(playerUuid);
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            loading.remove(playerUuid);
+        }
+    }
+
+    private Set<String> loadUnlocked(UUID playerUuid) {
+        Set<String> keys = ConcurrentHashMap.newKeySet();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT game_id, achievement FROM tea_achievements WHERE uuid = ?")) {
+            ps.setString(1, playerUuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    keys.add(rs.getString(1) + ":" + rs.getString(2));
+                }
+            }
+            return keys;
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Failed to load achievements of " + playerUuid, e);
+            return null;
+        }
+    }
+
+    private void remember(UUID playerUuid, GameId gameId, String achievementId) {
+        Unlocked known = unlocked.getIfPresent(playerUuid);
+        if (known != null) {
+            known.keys().add(key(gameId, achievementId));
+        }
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        loadAsync(event.getPlayer().getUniqueId());
+    }
+
+    public void close() {
+        io.shutdown();
+        try {
+            io.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

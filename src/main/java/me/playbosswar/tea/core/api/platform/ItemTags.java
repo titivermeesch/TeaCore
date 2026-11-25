@@ -9,8 +9,8 @@ import org.jetbrains.annotations.Nullable;
  * or "this fireball is a meteor". Keys are namespaced by the owning plugin.
  *
  * <p>Items keep their tags when saved and moved between inventories (persistent
- * data on 1.14+, item NBT on older servers). Entity tags only live while the
- * server runs on versions before 1.14; that's enough for projectiles and NPCs.
+ * data on 1.16.5+, item NBT on 1.8 - 1.12). On 1.8 - 1.12 entity tags only live
+ * while the server runs; that's enough for projectiles and NPCs.
  */
 public interface ItemTags {
 

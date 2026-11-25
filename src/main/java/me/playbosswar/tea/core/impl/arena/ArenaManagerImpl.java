@@ -243,28 +243,18 @@ public final class ArenaManagerImpl implements ArenaManager {
     }
 
     private void finishRelease(ArenaImpl arena, ArenaId id, long t0, long t1) {
-        long t2 = t1;
-        long t3 = t1;
-
         Optional<World> maybeWorld = arena.world();
-        if (maybeWorld.isPresent() && keepSpare(arena, maybeWorld.get())) {
-            t2 = t3 = System.nanoTime();
-        } else if (maybeWorld.isPresent()) {
-            World world = maybeWorld.get();
-            Bukkit.unloadWorld(world, false);
-            t2 = System.nanoTime();
-            try {
-                Path folder = world.getWorldFolder().toPath();
-                deleteRecursive(folder);
-            } catch (IOException e) {
-                logger.log(Level.WARNING, "Failed to delete world folder for " + id, e);
-            }
-            t3 = System.nanoTime();
+        if (maybeWorld.isPresent() && !keepSpare(arena, maybeWorld.get())) {
+            destroyWorld(maybeWorld.get());
         }
+        long t3 = System.nanoTime();
 
         transition(arena, ArenaState.RELEASED, -1);
-        logger.info("Released arena " + id + " (evacuate " + ms(t0, t1) + " ms, unload " + ms(t1, t2)
-                + " ms, delete " + ms(t2, t3) + " ms)");
+        if (teamManager != null) {
+            teamManager.resetArena(id);
+        }
+        logger.info("Released arena " + id + " (evacuate " + ms(t0, t1) + " ms, unload and delete "
+                + ms(t1, t3) + " ms)");
     }
 
     private record Spare(World world, GameId game, String mapId, ArenaWorldConfig config) { }
@@ -281,7 +271,7 @@ public final class ArenaManagerImpl implements ArenaManager {
     }
 
     private static boolean asyncPaste() {
-        return Bukkit.getPluginManager().isPluginEnabled("FastAsyncWorldEdit");
+        return me.playbosswar.tea.core.impl.map.SchematicStore.current().pastesOffMainThread();
     }
 
     /** Pasting the same map over a kept world restores every block in the map's region, air included. */
@@ -341,9 +331,30 @@ public final class ArenaManagerImpl implements ArenaManager {
         }
     }
 
+    private static final int UNLOAD_ATTEMPTS = 5;
+    private static final long UNLOAD_RETRY_TICKS = 100L;
+
     private void destroyWorld(World world) {
-        Path folder = world.getWorldFolder().toPath();
-        Bukkit.unloadWorld(world, false);
+        destroyWorld(world.getName(), world.getWorldFolder().toPath(), 1);
+    }
+
+    /** Deletes the folder only once the world is unloaded; deleting a loaded world corrupts the server's view of it. */
+    private void destroyWorld(String name, Path folder, int attempt) {
+        World world = Bukkit.getWorld(name);
+        if (world != null) {
+            for (Player p : world.getPlayers()) {
+                p.teleport(mainWorld().getSpawnLocation());
+            }
+            if (!Bukkit.unloadWorld(world, false)) {
+                if (attempt < UNLOAD_ATTEMPTS && plugin.isEnabled()) {
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> destroyWorld(name, folder, attempt + 1),
+                            UNLOAD_RETRY_TICKS);
+                } else {
+                    logger.warning("Could not unload world " + name + "; leaving its folder " + folder);
+                }
+                return;
+            }
+        }
         try {
             deleteRecursive(folder);
         } catch (IOException e) {
@@ -526,18 +537,101 @@ public final class ArenaManagerImpl implements ArenaManager {
         return true;
     }
 
-    public void handleDisconnect(UUID uuid) {
-        ArenaId id = playerArena.remove(uuid);
-        if (id == null)
-            return;
-        ArenaImpl arena = arenas.get(id);
-        if (arena == null)
-            return;
-        arena.removePlayer(uuid);
-        Player p = Bukkit.getPlayer(uuid);
-        if (p != null) {
+    /**
+     * Moves the player out locally rather than through the proxy: they are
+     * leaving anyway, and their saved location must not be inside the arena.
+     */
+    public void handleDisconnect(Player player) {
+        ArenaId id = playerArena.remove(player.getUniqueId());
+        ArenaImpl arena = id == null ? null : arenas.get(id);
+        if (arena != null) {
+            arena.removePlayer(player.getUniqueId());
             Bukkit.getPluginManager().callEvent(
-                    new ArenaPlayerLeaveEvent(arena, p, ArenaPlayerLeaveEvent.LeaveReason.DISCONNECT));
+                    new ArenaPlayerLeaveEvent(arena, player, ArenaPlayerLeaveEvent.LeaveReason.DISCONNECT));
+        }
+        if (!isArenaWorld(player.getWorld())) {
+            return;
+        }
+        if (arena != null) {
+            sendToMainWorld(player, arena);
+        } else {
+            // An observer: their inventory is their own.
+            player.teleport(mainWorld().getSpawnLocation());
+            player.setGameMode(worldConfig(null).leaveGameMode());
+        }
+    }
+
+    /** Inside an arena world without being in that arena, such as after logging out mid-match. */
+    public boolean isStranded(Player player) {
+        return isArenaWorld(player.getWorld()) && !playerArena.containsKey(player.getUniqueId());
+    }
+
+    public void rescueStranded(Player player) {
+        sendToMainWorld(player, null);
+    }
+
+    private static boolean isArenaWorld(World world) {
+        return world.getName().startsWith("tea_arena_");
+    }
+
+    private void sendToMainWorld(Player player, @Nullable ArenaImpl arena) {
+        player.teleport(mainWorld().getSpawnLocation());
+        player.getInventory().clear();
+        player.getInventory().setArmorContents(new org.bukkit.inventory.ItemStack[4]);
+        for (org.bukkit.potion.PotionEffect effect : player.getActivePotionEffects()) {
+            player.removePotionEffect(effect.getType());
+        }
+        player.setFireTicks(0);
+        player.setFallDistance(0);
+        player.setFoodLevel(20);
+        player.setGameMode(worldConfig(arena).leaveGameMode());
+    }
+
+    private ArenaWorldConfig worldConfig(@Nullable ArenaImpl arena) {
+        return arena == null
+                ? ArenaWorldConfig.defaults().build()
+                : gameRegistry.get(arena.gameId())
+                        .map(GameDefinition::arenaWorld)
+                        .orElseGet(() -> ArenaWorldConfig.defaults().build());
+    }
+
+    private static World mainWorld() {
+        return Bukkit.getWorlds().stream()
+                .filter(w -> !isArenaWorld(w))
+                .findFirst()
+                .orElse(Bukkit.getWorlds().get(0));
+    }
+
+    /** At least {@code minPlayers}, and at least two sides once teams are assigned. */
+    boolean canGoLive(ArenaImpl arena) {
+        int players = arena.players().size();
+        if (players == 0 || players < arena.minPlayers()) {
+            return false;
+        }
+        if (arena.minPlayers() < 2 || teamManager == null) {
+            return true;
+        }
+        java.util.Set<Object> sides = new java.util.HashSet<>();
+        boolean anyAssigned = false;
+        for (UUID uuid : arena.players()) {
+            Optional<me.playbosswar.tea.core.api.team.Team> team = teamManager.teamOf(arena.id(), uuid);
+            anyAssigned |= team.isPresent();
+            sides.add(team.<Object>map(me.playbosswar.tea.core.api.team.Team::id).orElse(uuid));
+        }
+        return !anyAssigned || teamManager.isSingleTeam(arena.id()) || sides.size() >= 2;
+    }
+
+    /** Back from STARTING to WAITING; teams are dropped so the next start assigns them again. */
+    void returnToWaiting(ArenaImpl arena, GameDefinition def) {
+        transition(arena, ArenaState.WAITING, def.lifecycle().maxWaitSeconds());
+        if (teamManager != null) {
+            teamManager.resetArena(arena.id());
+        }
+        for (UUID uuid : arena.players()) {
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                teleportIn(arena, p, false);
+            }
         }
     }
 
@@ -655,13 +749,12 @@ public final class ArenaManagerImpl implements ArenaManager {
         WorldCreator creator = me.playbosswar.tea.core.api.TeaCoreAPI.get().platform().worlds().voidWorld(worldName)
                 .environment(World.Environment.NORMAL)
                 .generateStructures(false);
-        World world = creator.createWorld();
+        World world = ArenaWorlds.create(creator);
         if (world == null) {
             throw new IllegalStateException("Failed to create arena world " + worldName);
         }
         world.setSpawnLocation(0, 64, 0);
         world.setAutoSave(false);
-        world.setKeepSpawnInMemory(false);
 
         // Paper reads data/raids.dat on unload even with autoSave off and logs a
         // NoSuchFileException when it's missing. An empty file makes the save a no-op.
@@ -776,17 +869,8 @@ public final class ArenaManagerImpl implements ArenaManager {
             // API not initialized yet: fall through to a local teleport.
         }
 
-        World fallback = Bukkit.getWorlds().stream()
-                .filter(w -> !w.getName().startsWith("tea_arena_"))
-                .findFirst()
-                .orElse(Bukkit.getWorlds().get(0));
-        player.teleport(fallback.getSpawnLocation());
-        ArenaWorldConfig cfg = arena == null
-                ? ArenaWorldConfig.defaults().build()
-                : gameRegistry.get(arena.gameId())
-                        .map(GameDefinition::arenaWorld)
-                        .orElseGet(() -> ArenaWorldConfig.defaults().build());
-        player.setGameMode(cfg.leaveGameMode());
+        player.teleport(mainWorld().getSpawnLocation());
+        player.setGameMode(worldConfig(arena).leaveGameMode());
     }
 
     void evacuate(ArenaImpl arena) {

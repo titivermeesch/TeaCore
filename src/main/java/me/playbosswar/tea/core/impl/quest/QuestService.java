@@ -177,23 +177,44 @@ public final class QuestService implements Listener {
     }
 
     public void load(UUID uuid) {
+        load(uuid, 1);
+    }
+
+    /** A player whose progress could not be read gets no progress until a retry succeeds, so nothing is paid twice. */
+    private void load(UUID uuid, int attempt) {
         String day = dayKey();
         String week = weekKey();
         io.execute(() -> {
             Map<String, Integer> p = new ConcurrentHashMap<>();
             try (Connection c = dataSource.getConnection();
-                 PreparedStatement ps = c.prepareStatement("SELECT period_key, quest_id, progress FROM "
+                 PreparedStatement ps = c.prepareStatement("SELECT period_key, quest_id, progress, completed FROM "
                          + "tea_quest_progress WHERE player_uuid = ? AND period_key IN (?, ?)")) {
                 ps.setString(1, uuid.toString());
                 ps.setString(2, day);
                 ps.setString(3, week);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
-                        p.put(key(rs.getString(1), rs.getString(2)), rs.getInt(3));
+                        String questId = rs.getString(2);
+                        int value = rs.getInt(3);
+                        if (rs.getInt(4) != 0) {
+                            Quest q = (rs.getString(1).startsWith("w") ? weekly : daily).get(questId);
+                            if (q != null) {
+                                value = Math.max(value, q.amount());
+                            }
+                        }
+                        p.put(key(rs.getString(1), questId), value);
                     }
                 }
             } catch (SQLException e) {
-                logger.log(Level.WARNING, "Could not load quests of " + uuid, e);
+                logger.log(Level.WARNING, "Could not load quests of " + uuid + " (attempt " + attempt + ")", e);
+                if (attempt < 5 && plugin.isEnabled()) {
+                    Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                        if (Bukkit.getPlayer(uuid) != null) {
+                            load(uuid, attempt + 1);
+                        }
+                    }, 20L * 10 * attempt);
+                }
+                return;
             }
             progress.put(uuid, p);
         });
@@ -245,10 +266,7 @@ public final class QuestService implements Listener {
                 }
                 int after = Math.min(q.amount(), before + amount);
                 p.put(k, after);
-                save(uuid, period, q.id(), after, after >= q.amount());
-                if (after >= q.amount()) {
-                    complete(uuid, q);
-                }
+                save(uuid, period, q, after, after >= q.amount());
             }
         }
     }
@@ -281,37 +299,67 @@ public final class QuestService implements Listener {
         return q.commands().isEmpty() ? "-" : "a prize";
     }
 
-    private void save(UUID uuid, String period, String questId, int value, boolean done) {
+    /**
+     * Never lowers stored progress or touches a completed row. The reward is paid
+     * only when this write is the one that marks the quest completed.
+     */
+    private void save(UUID uuid, String period, Quest q, int value, boolean done) {
         io.execute(() -> {
+            boolean claimed = false;
             try (Connection c = dataSource.getConnection()) {
                 int updated;
                 try (PreparedStatement up = c.prepareStatement("UPDATE tea_quest_progress SET progress = ?, "
-                        + "completed = ?, updated_at = ? WHERE player_uuid = ? AND period_key = ? AND quest_id = ?")) {
+                        + "completed = ?, updated_at = ? WHERE player_uuid = ? AND period_key = ? AND quest_id = ? "
+                        + "AND completed = 0 AND progress < ?")) {
                     up.setInt(1, value);
                     up.setInt(2, done ? 1 : 0);
                     up.setLong(3, System.currentTimeMillis());
                     up.setString(4, uuid.toString());
                     up.setString(5, period);
-                    up.setString(6, questId);
+                    up.setString(6, q.id());
+                    up.setInt(7, value);
                     updated = up.executeUpdate();
                 }
-                if (updated == 0) {
+                if (updated == 0 && !exists(c, uuid, period, q.id())) {
                     try (PreparedStatement ins = c.prepareStatement("INSERT INTO tea_quest_progress (player_uuid, "
                             + "period_key, quest_id, progress, completed, updated_at) VALUES (?, ?, ?, ?, ?, ?)")) {
                         ins.setString(1, uuid.toString());
                         ins.setString(2, period);
-                        ins.setString(3, questId);
+                        ins.setString(3, q.id());
                         ins.setInt(4, value);
                         ins.setInt(5, done ? 1 : 0);
                         ins.setLong(6, System.currentTimeMillis());
-                        ins.executeUpdate();
+                        updated = ins.executeUpdate();
                     }
                 }
+                claimed = done && updated > 0;
             } catch (SQLException e) {
                 logger.log(Level.WARNING, "Could not save quest progress of " + uuid, e);
             }
+            if (claimed) {
+                if (plugin.isEnabled()) {
+                    Bukkit.getScheduler().runTask(plugin, () -> complete(uuid, q));
+                } else {
+                    claimedDuringShutdown.add(() -> complete(uuid, q));
+                }
+            }
         });
     }
+
+    private static boolean exists(Connection c, UUID uuid, String period, String questId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT 1 FROM tea_quest_progress "
+                + "WHERE player_uuid = ? AND period_key = ? AND quest_id = ?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, period);
+            ps.setString(3, questId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> claimedDuringShutdown =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     public void cleanUp() {
         io.execute(() -> {
@@ -332,6 +380,10 @@ public final class QuestService implements Listener {
             io.awaitTermination(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+        Runnable pending;
+        while ((pending = claimedDuringShutdown.poll()) != null) {
+            pending.run();
         }
     }
 

@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,6 +36,8 @@ import javax.sql.DataSource;
 public final class SharedFiles {
 
     private static final int PART = 1024 * 1024;
+    /** Unreferenced chunks younger than this may belong to an upload that has not committed yet. */
+    private static final long CHUNK_GRACE_MS = 15 * 60 * 1000L;
 
     private final DataSource db;
     private final Path base;
@@ -48,6 +51,11 @@ public final class SharedFiles {
      */
     private final Map<String, String> synced = new HashMap<>();
     private final Path stateFile;
+    private static final String DB_LINE = "db ";
+    private String dbIdentity;
+    /** Hashes this server found without content and already asked the others to upload again. */
+    private final Set<String> requested = new HashSet<>();
+    private boolean announce;
 
     /**
      * @param pluginsFolder the server's {@code plugins} folder
@@ -85,6 +93,7 @@ public final class SharedFiles {
             Map<String, String> remote = listRemote(c);
             remote.keySet().removeIf(p -> !covered(p));
             Map<String, String> local = scanLocal();
+            Set<String> stored = storedHashes(c);
             if (remote.isEmpty()) {
                 if (!local.isEmpty()) {
                     logger.info("Uploading " + local.size() + " shared file(s) to the database.");
@@ -98,6 +107,15 @@ public final class SharedFiles {
                 String localHash = local.get(path);
                 if (e.getValue().equals(localHash)) {
                     synced.put(path, localHash);
+                    if (!stored.contains(localHash)) {
+                        byte[] data = Files.readAllBytes(resolve(path));
+                        if (localHash.equals(hash(data))) {
+                            logger.info("Re-uploading the missing content of " + path + ".");
+                            inTransaction(c, () -> storeChunks(c, localHash, data));
+                            stored.add(localHash);
+                            announce = true;
+                        }
+                    }
                     continue;
                 }
                 String known = synced.get(path);
@@ -110,9 +128,14 @@ public final class SharedFiles {
                 }
                 byte[] data = download(c, e.getValue());
                 if (data == null) {
-                    logger.warning("The database has no content for " + path + "; keeping the local copy.");
+                    logger.warning("The database has no content for " + path + "; keeping the local copy"
+                            + " and asking the other servers to upload it again.");
+                    if (requested.add(e.getValue())) {
+                        announce = true;
+                    }
                     continue;
                 }
+                requested.remove(e.getValue());
                 writeAtomically(resolve(path), data);
                 synced.put(path, e.getValue());
                 changed.add(path);
@@ -130,6 +153,18 @@ public final class SharedFiles {
             logger.log(Level.WARNING, "Could not load maps from the database; using the local files", e);
         }
         return changed;
+    }
+
+    /**
+     * Whether the last pull or push changed something the other servers should
+     * hear about: content re-uploaded for a file whose chunks had gone missing,
+     * or a file this server could not download because its content is missing.
+     * Reading it clears it.
+     */
+    public synchronized boolean takeAnnouncement() {
+        boolean out = announce;
+        announce = false;
+        return out;
     }
 
     /**
@@ -155,7 +190,13 @@ public final class SharedFiles {
             return;
         }
         try {
-            for (String line : Files.readAllLines(stateFile)) {
+            List<String> lines = Files.readAllLines(stateFile);
+            // State recorded against another database (e.g. before moving from SQLite to a shared
+            // MySQL) says nothing about this one; trusting it would delete local files as "removed".
+            if (lines.isEmpty() || !lines.get(0).equals(DB_LINE + databaseIdentity())) {
+                return;
+            }
+            for (String line : lines.subList(1, lines.size())) {
                 int space = line.indexOf(' ');
                 if (space > 0) {
                     synced.put(line.substring(space + 1), line.substring(0, space));
@@ -166,8 +207,21 @@ public final class SharedFiles {
         }
     }
 
+    private String databaseIdentity() {
+        if (dbIdentity == null) {
+            try (Connection c = db.getConnection()) {
+                String url = c.getMetaData().getURL();
+                int query = url == null ? -1 : url.indexOf('?');
+                dbIdentity = url == null ? "?" : query < 0 ? url : url.substring(0, query);
+            } catch (SQLException e) {
+                dbIdentity = "?";
+            }
+        }
+        return dbIdentity;
+    }
+
     private void saveState() {
-        StringBuilder out = new StringBuilder();
+        StringBuilder out = new StringBuilder(DB_LINE).append(databaseIdentity()).append('\n');
         synced.forEach((path, hash) -> out.append(hash).append(' ').append(path).append('\n'));
         try {
             writeAtomically(stateFile, out.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -179,16 +233,25 @@ public final class SharedFiles {
     private boolean pushChanges(Connection c, Map<String, String> local, Map<String, String> remote)
             throws SQLException, IOException {
         boolean any = false;
+        Set<String> stored = storedHashes(c);
         for (Map.Entry<String, String> e : local.entrySet()) {
             String path = e.getKey();
             String hash = e.getValue();
-            if (hash.equals(synced.get(path)) || hash.equals(remote.get(path))) {
+            boolean upToDate = hash.equals(remote.get(path)) ? stored.contains(hash) : hash.equals(synced.get(path));
+            if (upToDate) {
                 synced.put(path, hash);
                 continue;
             }
             byte[] data = Files.readAllBytes(resolve(path));
-            upload(c, hash, data);
-            upsertFile(c, path, hash, data.length);
+            if (!hash.equals(hash(data))) {
+                // Edited since the scan; the next push picks up the new content.
+                continue;
+            }
+            inTransaction(c, () -> {
+                storeChunks(c, hash, data);
+                upsertFile(c, path, hash, data.length);
+            });
+            stored.add(hash);
             synced.put(path, hash);
             any = true;
         }
@@ -204,7 +267,8 @@ public final class SharedFiles {
         }
         if (any) {
             try (PreparedStatement ps = c.prepareStatement(
-                    "DELETE FROM tea_file_chunks WHERE hash NOT IN (SELECT hash FROM tea_files)")) {
+                    "DELETE FROM tea_file_chunks WHERE touched_at < ? AND hash NOT IN (SELECT hash FROM tea_files)")) {
+                ps.setLong(1, System.currentTimeMillis() - CHUNK_GRACE_MS);
                 ps.executeUpdate();
             }
         }
@@ -241,27 +305,73 @@ public final class SharedFiles {
         return found && hash.equals(hash(data)) ? data : null;
     }
 
-    private static void upload(Connection c, String hash, byte[] data) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement("SELECT 1 FROM tea_file_chunks WHERE hash = ? AND part = 0")) {
-            ps.setString(1, hash);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return;
+    private static Set<String> storedHashes(Connection c) throws SQLException {
+        Set<String> out = new HashSet<>();
+        try (PreparedStatement ps = c.prepareStatement("SELECT hash FROM tea_file_chunks WHERE part = 0");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                out.add(rs.getString(1));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Writes the content for a hash, or marks existing content as just used so
+     * cleanup on another server leaves it alone until the file row commits.
+     */
+    private static void storeChunks(Connection c, String hash, byte[] data) throws SQLException {
+        long now = System.currentTimeMillis();
+        int parts = Math.max(1, (data.length + PART - 1) / PART);
+        try (PreparedStatement ps = c.prepareStatement("UPDATE tea_file_chunks SET touched_at = ? WHERE hash = ?")) {
+            ps.setLong(1, now);
+            ps.setString(2, hash);
+            int existing = ps.executeUpdate();
+            if (existing == parts) {
+                return;
+            }
+            if (existing > 0) {
+                try (PreparedStatement del = c.prepareStatement("DELETE FROM tea_file_chunks WHERE hash = ?")) {
+                    del.setString(1, hash);
+                    del.executeUpdate();
                 }
             }
         }
         try (PreparedStatement ps = c.prepareStatement(
-                "INSERT INTO tea_file_chunks (hash, part, data) VALUES (?, ?, ?)")) {
-            int part = 0;
-            for (int off = 0; off < data.length || part == 0; off += PART, part++) {
-                int len = Math.min(PART, data.length - off);
-                byte[] chunk = new byte[Math.max(0, len)];
-                System.arraycopy(data, off, chunk, 0, chunk.length);
+                "INSERT INTO tea_file_chunks (hash, part, data, touched_at) VALUES (?, ?, ?, ?)")) {
+            for (int part = 0; part < parts; part++) {
+                int off = part * PART;
+                int len = Math.max(0, Math.min(PART, data.length - off));
+                byte[] chunk = new byte[len];
+                System.arraycopy(data, off, chunk, 0, len);
                 ps.setString(1, hash);
                 ps.setInt(2, part);
                 ps.setBytes(3, chunk);
+                ps.setLong(4, now);
                 ps.executeUpdate();
             }
+        }
+    }
+
+    private interface SqlWork {
+        void run() throws SQLException;
+    }
+
+    private static void inTransaction(Connection c, SqlWork work) throws SQLException {
+        boolean auto = c.getAutoCommit();
+        c.setAutoCommit(false);
+        try {
+            work.run();
+            c.commit();
+        } catch (SQLException | RuntimeException e) {
+            try {
+                c.rollback();
+            } catch (SQLException rollback) {
+                e.addSuppressed(rollback);
+            }
+            throw e;
+        } finally {
+            c.setAutoCommit(auto);
         }
     }
 

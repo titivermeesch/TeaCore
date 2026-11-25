@@ -6,8 +6,7 @@ import java.util.function.Predicate;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * The modern platform cancels swap-hands for any match. Servers before 1.9
- * have no off hand.
+ * Items that can't be swapped into the off hand (1.9+; 1.8 has no off hand).
  */
 public final class LockedItems {
 

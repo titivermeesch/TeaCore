@@ -96,7 +96,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             "V012__quests.sql",
             "V013__shared_files.sql",
             "V014__match_recap.sql",
-            "V015__dashboard_samples.sql");
+            "V015__dashboard_samples.sql",
+            "V016__file_chunk_touched.sql",
+            "V017__network_secret.sql");
 
     public static final ErrorTracker ERROR_TRACKER = ErrorTracker.contextAware();
 
@@ -198,10 +200,22 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
 
     @Override
     public void onEnable() {
+        var version = me.playbosswar.tea.core.api.platform.ServerVersion.parse(getServer().getBukkitVersion());
+        if (!version.supported()) {
+            getLogger().severe("Minecraft " + version + " is not supported. Tea runs on 1.8.8 to 1.12.2 and on "
+                    + "1.16.5 or newer. Disabling TeaCore.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         metrics.ready();
         try {
             saveDefaultResources();
             loadConfigAndTheme();
+            if (!me.playbosswar.tea.core.impl.bootstrap.LibraryLoader.load(this,
+                    me.playbosswar.tea.core.impl.bootstrap.LibraryLoader.features(config))) {
+                getServer().getPluginManager().disablePlugin(this);
+                return;
+            }
             platform(); // pick the version platform now, so a mismatch fails at startup
 
             this.audiences = BukkitAudiences.create(this);
@@ -399,6 +413,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             getServer().getPluginManager().registerEvents(coreStatsService, this);
             this.achievementService = new AchievementServiceImpl(
                     databaseService.dataSource(), getLogger(), messageService);
+            getServer().getPluginManager().registerEvents(achievementService, this);
             this.discordWebhooks = new me.playbosswar.tea.core.impl.discord.DiscordWebhooks(this, getLogger());
             this.discordEvents = new me.playbosswar.tea.core.impl.discord.DiscordEvents(this, discordWebhooks);
             getServer().getPluginManager().registerEvents(discordEvents, this);
@@ -410,7 +425,11 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             this.leaderboardCache = new me.playbosswar.tea.core.impl.placeholder.LeaderboardCache(
                     this, databaseService.dataSource(), statsRegistry, getLogger());
             leaderboardCache.start();
-            placeholderService.registerGlobal(new CorePlaceholders(this, coreStatsService, arenaValues, leaderboardCache));
+            this.networkSnapshot = new me.playbosswar.tea.core.impl.placeholder.NetworkSnapshot(
+                    this, () -> coordinationBackend, gameRegistry, getLogger());
+            networkSnapshot.start();
+            placeholderService.registerGlobal(new CorePlaceholders(this, coreStatsService, arenaValues, leaderboardCache,
+                    networkSnapshot));
             placeholderService.registerGlobal(new GameStatsPlaceholders(statsRegistry));
             if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null
                     && getConfig().getBoolean("features.placeholders", true)) {
@@ -576,8 +595,13 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 statsCommand.setExecutor(exec);
                 statsCommand.setTabCompleter(exec);
             }
-            this.dashboardServer = new DashboardServer(this, this, config.dashboard(), getLogger());
-            this.dashboardServer.start();
+            // Without the dashboard its libraries are not downloaded, so DashboardServer must not even load.
+            if (config.dashboard().enabled()) {
+                this.dashboardServer = new DashboardServer(this, this, config.dashboard(), getLogger());
+                this.dashboardServer.start();
+            } else {
+                getLogger().info("Dashboard disabled in config; skipping HTTP server startup.");
+            }
 
             if (lobbyEnabled) {
                 enableLobbyFeatures();
@@ -615,12 +639,6 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         if (spectatorTools != null) {
             spectatorTools.stop();
         }
-        if (ratings != null) {
-            ratings.close();
-        }
-        if (quests != null) {
-            quests.close();
-        }
         try {
             if (dashboardServer != null)
                 dashboardServer.stop();
@@ -636,6 +654,8 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 scoreboardManager.stop();
             if (leaderboardCache != null)
                 leaderboardCache.stop();
+            if (networkSnapshot != null)
+                networkSnapshot.stop();
             if (menuService != null)
                 menuService.stop();
             if (mapEditorTools != null)
@@ -683,6 +703,27 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
                 coordinationBackend.close();
         } catch (Exception ignored) {
         }
+        // Arena release above can end matches, so the database writers drain only now.
+        try {
+            if (ratings != null)
+                ratings.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (quests != null)
+                quests.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (coreStatsService != null)
+                coreStatsService.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (achievementService != null)
+                achievementService.close();
+        } catch (Exception ignored) {
+        }
         try {
             if (databaseService != null)
                 databaseService.close();
@@ -708,7 +749,16 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             return new InMemoryBackend(serverId);
         }
         try {
-            return new RedisBackend(serverId, config.redis(), getLogger());
+            String override = getConfig().getString("network.secret", "");
+            if ((override == null || override.isBlank())
+                    && config.database().type() != CoreConfig.DatabaseType.MYSQL) {
+                getLogger().warning("network.mode is " + config.network().mode() + " but the database is not"
+                        + " shared, so each server makes its own network secret and ignores the others' Redis"
+                        + " messages. Use MySQL or set the same network.secret on every server.");
+            }
+            byte[] secret = me.playbosswar.tea.core.impl.coordination.NetworkSecret.resolve(
+                    databaseService.dataSource(), override);
+            return new RedisBackend(serverId, config.redis(), secret, getLogger());
         } catch (Exception e) {
             getLogger().log(Level.SEVERE,
                     "Redis coordination failed; falling back to in-memory backend. Cross-server features disabled.", e);
@@ -973,6 +1023,7 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
     private me.playbosswar.tea.core.impl.settings.SettingsStore settingsStore;
     private me.playbosswar.tea.core.impl.arena.Hosting hosting;
     private me.playbosswar.tea.core.impl.map.SharedFiles sharedFiles;
+    private me.playbosswar.tea.core.impl.placeholder.NetworkSnapshot networkSnapshot;
 
     /** Null when {@code maps.storage: files}. */
     public me.playbosswar.tea.core.impl.map.SharedFiles sharedFiles() {
@@ -985,13 +1036,18 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
             return;
         }
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
-            if (files.push() && coordinationBackend != null) {
-                coordinationBackend.publishEvent(new me.playbosswar.tea.core.api.coordination.CoordinationEvent(
-                        me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.FILES_CHANGED,
-                        coordinationBackend.serverId(), null, null, null, null, null, null, null, null, null,
-                        0, -1, null));
+            boolean pushed = files.push();
+            if ((files.takeAnnouncement() || pushed) && coordinationBackend != null) {
+                announceSharedFiles();
             }
         });
+    }
+
+    private void announceSharedFiles() {
+        coordinationBackend.publishEvent(new me.playbosswar.tea.core.api.coordination.CoordinationEvent(
+                me.playbosswar.tea.core.api.coordination.CoordinationEvent.Type.FILES_CHANGED,
+                coordinationBackend.serverId(), null, null, null, null, null, null, null, null, null,
+                0, -1, null));
     }
 
     /**
@@ -1081,6 +1137,9 @@ public final class TeaCorePlugin extends JavaPlugin implements TeaCoreAPI {
         }
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
             java.util.Set<String> changed = sharedFiles.pull();
+            if (sharedFiles.takeAnnouncement()) {
+                announceSharedFiles();
+            }
             if (changed.isEmpty()) {
                 return;
             }

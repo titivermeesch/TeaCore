@@ -9,11 +9,11 @@ Full user and developer documentation: [TeaDocs](https://titivermeesch.github.io
 ## Requirements
 
 - Java 17 or newer (building needs JDK 21)
-- Paper (or Spigot) from **1.8.8** to the latest release. The same jar runs on all of them: TeaCore picks a 1.8-1.12 or a 1.13+ platform at startup.
+- Paper (or Spigot) **1.8.8 to 1.12.2** or **1.16.5 to the latest release**. The same jar runs on all of them: TeaCore picks a 1.8-1.12 or a modern platform at startup. 1.13 to 1.16.4 can't load Java 17 plugins.
 - [Vault](https://www.spigotmc.org/resources/vault.34315/) (hard dependency)
 
 Soft dependencies, all optional:
-- WorldEdit or FastAsyncWorldEdit. You install it yourself; TeaCore doesn't bundle it. Maps need it on 1.13+. On 1.8-1.12 TeaCore reads and writes MCEdit `.schematic` files itself.
+- WorldEdit or FastAsyncWorldEdit. You install it yourself; TeaCore doesn't bundle it. Maps need it on 1.16.5+. On 1.8-1.12 TeaCore reads and writes MCEdit `.schematic` files itself.
 - PlaceholderAPI
 - floodgate, for Bedrock forms through Geyser
 - Parties or Spigot-Party-API-PAF
@@ -37,7 +37,7 @@ The build writes two jars to `build/libs/`:
 
 The code is split into source sets:
 - `main`: shared code, compiled against the Spigot 1.8.8 API.
-- `modern` (`src/modern/java`): code for 1.13+.
+- `modern` (`src/modern/java`): code for 1.16.5+.
 - `legacy` (`src/legacy/java`): code for 1.8-1.12.
 - `cloudnet3` (`src/cloudnet3/java`): the CloudNet v3 integration. It compiles against the CloudNet 3.4.5 jars in `libs/cloudnet-v3/`, since v3 isn't on any Maven repository.
 
